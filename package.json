@@ -1,9 +1,0 @@
-{
-  "name": "scripts-integration",
-  "version": "1.0.0",
-  "description": "Healthcare Data Settlement & Reporting System",
-  "main": "index.js",
-  "dependencies": {
-    "xlsx": "^0.18.5"
-  }
-}
