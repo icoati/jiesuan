@@ -7,14 +7,14 @@
 
 ---
 
-## 支持的业务功能 (访问密码: `910104`)
+## 支持的业务功能
 
 | 模块名称 | 核心驱动 | 输入文件要求 | 输出结果 |
 | :--- | :--- | :--- | :--- |
-| **1. 上药雷允上进度表** | Python (`统计报表.py`) | 2 个 Excel：分别包含「答卷记录」与「项目人员」工作表 | `统计总表.xlsx`（包含统计汇总、人员维度、案例维度） |
-| **2. 医生劳务费一键结算（语料库）** | Python (`settlement_mac.py`) | 1 个必选 Excel（明细）+ 1 个可选 Excel（确认单） | `劳务明细总表_*.xlsx`、`任务明细表_*.xlsx`、ZIP 打包 |
-| **3. 语料库电签一键结算（语料库）** | Python (`settlement_tool.py`) | 3 个 Excel/XLS（支付清单、语料明文、用户明文） | `最终.xlsx`、`最终.xls`、对账筛选表、待核查告警名单、ZIP 打包 |
-| **4. 陈菊梅基金会-雷允上结算包** | Python (`generate_settlement.py`) | 3 个 Excel（项目进度表、语料明文表、用户明文表） | `YYYYMMDD-劳务费用明细表.xlsx`（含汇总明细、分项目明细、语料对账总表） |
+| **模块 1：项目进度统计与案例汇总** | Python (`统计报表.py`) | 2 个 Excel（答卷记录表、人员列表） | `统计总表.xlsx`（包含统计汇总、人员维度、案例维度） |
+| **模块 2：劳务费用核算与明细拆分** | Python (`settlement_mac.py`) | 1 个必选 Excel（明细）+ 1 个可选 Excel（确认单） | `劳务明细总表_*.xlsx`、`任务明细表_*.xlsx`、ZIP 打包 |
+| **模块 3：对账清算与凭据核验系统** | Python (`settlement_tool.py`) | 3 个 Excel/XLS（支付清单、数据明细、用户明细） | `最终.xlsx`、`最终.xls`、对账筛选表、待核查告警名单、ZIP 打包 |
+| **模块 4：多源数据归档与综合结算包** | Python (`generate_settlement.py`) | 3 个 Excel（项目进度表、数据明细表、用户明细表） | `YYYYMMDD-劳务费用明细表.xlsx`（含汇总明细、分项目明细、对账总表） |
 
 ---
 
@@ -72,27 +72,12 @@ streamlit run app.py
 
 ---
 
-## 📁 项目目录结构说明
+## 📁 项目目录说明
 
 ```text
-脚本集成/
-├── app.py                      # Streamlit 统一门户主程序 (100% 纯 Python 全栈引擎)
+├── app.py                      # Web 统一门户主程序 (100% 纯 Python 全栈引擎)
 ├── requirements.txt            # Python 依赖清单 (streamlit, pandas, openpyxl, xlwt, xlrd)
-├── .gitignore                  # Git 忽略文件（忽略缓存与临时表）
-├── 一键启动服务.bat            # Windows 本机与局域网一键双击启动脚本
-├── 上药报表统计/
-│   ├── 统计报表.py              # [Python 原生版] 心血管内科进度表统计核心脚本
-│   ├── 统计报表.js              # [原版 Node.js 脚本保留备份]
-│   └── 使用说明.txt
-├── 整合学会统计/
-│   ├── settlement_mac.py       # [Python 原生版] 劳务费结算核心脚本
-│   └── README_MAC.md
-├── 语料库电签统计/
-│   ├── settlement_tool.py      # [Python 原生版] 语料库月度结算核心脚本
-│   └── README_Mac使用说明.md
-└── 陈菊梅基金会-雷允上结算包/
-    ├── generate_settlement.py  # [Python 原生版] 基金会劳务费用明细导出核心脚本
-    ├── README_使用说明.md
-    ├── run_windows.bat
-    └── run_mac.command
+├── .gitignore                  # Git 忽略规则
+├── 一键启动服务.bat            # Windows 本机与局域网一键启动脚本
+└── 各业务模块目录/             # 四大业务数据清洗与报表生成核心算法脚本
 ```
