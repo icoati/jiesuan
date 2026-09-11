@@ -1102,11 +1102,11 @@ if current_module == MODULE_SHANGYAO:
                 render_html('<span class="ios-badge-pending">尚未检测到包含「项目人员」工作表的文件</span>', container=cols_check[1])
         render_html('</div>')
 
-    _, col_btn, _ = st.columns([1, 1.4, 1])
+    _, col_btn, _ = st.columns([1, 1.8, 1])
     with col_btn:
         ready_to_run = bool(has_src and has_staff)
         run_btn = st.button(
-            "开始生成报表",
+            f"开始生成：{MODULE_SHANGYAO}",
             type="primary",
             disabled=not ready_to_run if uploaded_files else False,
             use_container_width=True
@@ -1273,9 +1273,9 @@ elif current_module == MODULE_ZHENGHE:
         except Exception:
             pass
 
-    _, col_btn, _ = st.columns([1, 1.4, 1])
+    _, col_btn, _ = st.columns([1, 1.8, 1])
     with col_btn:
-        run_btn = st.button("一键生成结算表格", type="primary", use_container_width=True)
+        run_btn = st.button(f"开始生成：{MODULE_ZHENGHE}", type="primary", use_container_width=True)
 
     if run_btn:
         if not file_yl:
@@ -1498,11 +1498,11 @@ elif current_module == MODULE_CORPUS:
                 render_html('<span class="ios-badge-pending">待识别：用户列表(明文)</span>', container=chk_cols[2])
         render_html('</div>')
 
-    _, col_btn, _ = st.columns([1, 1.4, 1])
+    _, col_btn, _ = st.columns([1, 1.8, 1])
     with col_btn:
         ready_corpus = bool(uploaded_files and len(uploaded_files) >= 3)
         run_btn = st.button(
-            "开始生成每月结算发放表",
+            f"开始生成：{MODULE_CORPUS}",
             type="primary",
             disabled=not ready_corpus if uploaded_files else False,
             use_container_width=True
@@ -1718,9 +1718,9 @@ elif current_module == MODULE_JUMEI:
                 render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">03 用户列表(明文)</div><div class="ios-status-card-val">未识别 (需包含“用户”)</div></div>')
 
     # 操作按钮黄金居中排布
-    _, col_btn, _ = st.columns([1, 1.4, 1])
+    _, col_btn, _ = st.columns([1, 1.8, 1])
     with col_btn:
-        start_jumei = st.button("开始生成结算包", type="primary", use_container_width=True)
+        start_jumei = st.button(f"开始生成：{MODULE_JUMEI}", type="primary", use_container_width=True)
 
     if start_jumei:
         if not uploaded_jumei_files or len(uploaded_jumei_files) < 3:
