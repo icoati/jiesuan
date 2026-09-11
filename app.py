@@ -200,7 +200,21 @@ render_html("""
         color: #f8fafc !important;
     }
 
-    /* ================= 密码输入框与眼睛图标深度修复 ================= */
+    /* ================= 密码输入框与表单提示深度清理 ================= */
+    /* 彻底隐藏 Streamlit 的表单回车提示英文 (Press Enter to submit form) */
+    [data-testid="InputInstructions"],
+    div[data-testid="InputInstructions"],
+    div[data-baseweb="input"] [data-testid="InputInstructions"] {
+        display: none !important;
+        visibility: hidden !important;
+        font-size: 0 !important;
+        width: 0 !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+    }
+
     /* 1. 外层输入框容器：统一橙色高光边框 */
     div[data-testid="stForm"] [data-testid="stTextInput"] > div[data-baseweb="input"] {
         border: 2px solid #ea580c !important;
@@ -210,11 +224,11 @@ render_html("""
         height: 52px !important;
         display: flex !important;
         align-items: center !important;
-        padding-right: 8px !important;
+        padding: 0 !important;
         overflow: hidden !important;
     }
 
-    /* 2. 文本输入核心区：透明底、无多余内边距 */
+    /* 2. 文本输入核心区：占满整行、纯净无杂质 */
     div[data-testid="stForm"] [data-testid="stTextInput"] input {
         background: transparent !important;
         border: none !important;
@@ -222,33 +236,21 @@ render_html("""
         color: #0f172a !important;
         font-size: 1.05rem !important;
         font-weight: 500 !important;
-        padding: 0 14px !important;
+        padding: 0 16px !important;
         height: 100% !important;
+        width: 100% !important;
+        flex: 1 1 100% !important;
     }
     div[data-testid="stForm"] [data-testid="stTextInput"] input::placeholder {
         color: #94a3b8 !important;
     }
 
-    /* 3. 密码眼睛切换按钮：彻底清除任何背景与畸变 */
+    /* 3. 彻底隐藏密码框内溢出的英文按钮文字 (visibility) */
     div[data-testid="stForm"] [data-testid="stTextInput"] button {
-        background: transparent !important;
-        background-color: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        color: #64748b !important;
-        width: 38px !important;
-        height: 38px !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        cursor: pointer !important;
-    }
-    div[data-testid="stForm"] [data-testid="stTextInput"] button svg {
-        fill: #64748b !important;
-        width: 20px !important;
-        height: 20px !important;
+        display: none !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
     }
 
     /* 4. 登录提交主大按钮：仅定向作用于提交按钮，绝不污染眼睛按钮 */
