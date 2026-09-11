@@ -11,7 +11,7 @@
 
 | 模块名称 | 核心驱动 | 输入文件要求 | 输出结果 |
 | :--- | :--- | :--- | :--- |
-| **1. 上药雷允上进度表** | Node.js (`统计报表.js`) | 2 个 Excel：分别包含「答卷记录」与「项目人员」工作表 | `统计总表.xlsx`（包含统计汇总、人员维度、案例维度） |
+| **1. 上药雷允上进度表** | Python (`统计报表.py`) | 2 个 Excel：分别包含「答卷记录」与「项目人员」工作表 | `统计总表.xlsx`（包含统计汇总、人员维度、案例维度） |
 | **2. 医生劳务费一键结算（语料库）** | Python (`settlement_mac.py`) | 1 个必选 Excel（明细）+ 1 个可选 Excel（确认单） | `劳务明细总表_*.xlsx`、`任务明细表_*.xlsx`、ZIP 打包 |
 | **3. 语料库电签一键结算（语料库）** | Python (`settlement_tool.py`) | 3 个 Excel/XLS（支付清单、语料明文、用户明文） | `最终.xlsx`、`最终.xls`、对账筛选表、待核查告警名单、ZIP 打包 |
 | **4. 陈菊梅基金会-雷允上结算包** | Python (`generate_settlement.py`) | 3 个 Excel（项目进度表、语料明文表、用户明文表） | `YYYYMMDD-劳务费用明细表.xlsx`（含汇总明细、分项目明细、语料对账总表） |
@@ -21,15 +21,12 @@
 ## 🚀 方式一：本地直接运行
 
 ### 1. 安装依赖
-确保本机已安装 Python 3.8+ 及 Node.js。
-在项目根目录下打开终端（PowerShell 或 Mac 终端），运行：
+全套系统现已实现 **100% 纯 Python 原生架构**，无需安装 Node.js 或 npm！
+确保本机已安装 Python 3.8+，在项目根目录下打开终端，运行：
 
 ```bash
-# 安装 Python 依赖
+# 一键安装全部依赖（pandas、openpyxl、streamlit 等）
 pip install -r requirements.txt
-
-# 安装 Node.js 依赖 (用于上药雷允上进度表统计)
-npm install
 ```
 
 ### 2. 启动服务
@@ -71,9 +68,7 @@ streamlit run app.py
 3. 点击 **Deploy!**。
 
 > **云端依赖说明：**
-> 仓库中的 `packages.txt` 会命令云端 Linux 自动安装 `nodejs` 和 `npm`；
-> 仓库中的 `requirements.txt` 会自动安装 Python 依赖库；
-> 应用启动时会自动检查并安装 `xlsx` 库，全程无需手动配置服务器。
+> 全量业务模块均已统一为 **100% 纯 Python 原生执行**，只需 `requirements.txt` 安装常用数据分析库即可运行，彻底免除了 Node.js 运行时配置。
 
 ---
 
@@ -81,23 +76,22 @@ streamlit run app.py
 
 ```text
 脚本集成/
-├── app.py                      # Streamlit 统一门户主程序
-├── requirements.txt            # Python 依赖清单
-├── packages.txt                # Streamlit Cloud 底层系统包 (nodejs, npm)
-├── package.json                # Node.js 依赖说明文件
-├── .gitignore                  # Git 忽略文件（忽略 node_modules、缓存与临时表）
+├── app.py                      # Streamlit 统一门户主程序 (100% 纯 Python 全栈引擎)
+├── requirements.txt            # Python 依赖清单 (streamlit, pandas, openpyxl, xlwt, xlrd)
+├── .gitignore                  # Git 忽略文件（忽略缓存与临时表）
 ├── 一键启动服务.bat            # Windows 本机与局域网一键双击启动脚本
 ├── 上药报表统计/
-│   ├── 统计报表.js              # [原版] 心血管内科统计核心脚本
+│   ├── 统计报表.py              # [Python 原生版] 心血管内科进度表统计核心脚本
+│   ├── 统计报表.js              # [原版 Node.js 脚本保留备份]
 │   └── 使用说明.txt
 ├── 整合学会统计/
-│   ├── settlement_mac.py       # [原版] 劳务费结算核心脚本
+│   ├── settlement_mac.py       # [Python 原生版] 劳务费结算核心脚本
 │   └── README_MAC.md
 ├── 语料库电签统计/
-│   ├── settlement_tool.py      # [原版] 语料库月度结算核心脚本
+│   ├── settlement_tool.py      # [Python 原生版] 语料库月度结算核心脚本
 │   └── README_Mac使用说明.md
 └── 陈菊梅基金会-雷允上结算包/
-    ├── generate_settlement.py  # [原版] 基金会劳务费用明细导出核心脚本
+    ├── generate_settlement.py  # [Python 原生版] 基金会劳务费用明细导出核心脚本
     ├── README_使用说明.md
     ├── run_windows.bat
     └── run_mac.command

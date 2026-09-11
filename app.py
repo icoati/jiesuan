@@ -842,23 +842,6 @@ def create_zip_archive(files_dict: dict) -> bytes:
     return zip_buffer.getvalue()
 
 
-def get_node_executable():
-    """获取 node 可执行路径"""
-    return shutil.which("node")
-
-
-def ensure_node_modules():
-    """确保 Node.js 的 xlsx 依赖就绪"""
-    xlsx_dir = os.path.join(ROOT_DIR, "node_modules", "xlsx")
-    if not os.path.exists(xlsx_dir):
-        npm_path = shutil.which("npm")
-        if npm_path:
-            try:
-                subprocess.run([npm_path, "install", "xlsx"], cwd=ROOT_DIR, capture_output=True, timeout=90)
-            except Exception:
-                pass
-
-
 # -------------------------------------------------------------
 # 门禁控制：7 天内免密持久化引擎 (LocalStorage + HMAC Token)
 # -------------------------------------------------------------
@@ -1019,13 +1002,9 @@ with st.sidebar:
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("##### 系统环境状态")
-    node_bin = get_node_executable()
-    if node_bin:
-        render_html('<span class="ios-badge-success">Node.js 运行时就绪</span>', container=st.sidebar)
-    else:
-        render_html('<span class="ios-badge-pending">Node.js 运行时未就绪</span>', container=st.sidebar)
-    render_html(f'<span class="ios-badge-success">Python {sys.version.split()[0]}</span>', container=st.sidebar)
+    render_html(f'<span class="ios-badge-success">Python {sys.version.split()[0]} 原生全栈引擎</span>', container=st.sidebar)
     render_html('<span class="ios-badge-success">7天免密保护中</span>', container=st.sidebar)
+    render_html('<span class="ios-badge-success">4大业务模块就绪</span>', container=st.sidebar)
 
 
 current_module = st.session_state["current_module"]
@@ -1048,7 +1027,7 @@ if current_module == MODULE_SHANGYAO:
         </div>
         <div class="ios-hero-pill">
             <span class="ios-hero-pill-dot"></span>
-            原版内核引擎
+            Python 原生引擎
         </div>
     </div>
     """)
@@ -1131,11 +1110,8 @@ if current_module == MODULE_SHANGYAO:
             st.error("请至少上传 2 个 Excel 文件（分别包含「答卷记录」和「项目人员」）")
         elif not has_src or not has_staff:
             st.error("上传的文件中未能同时找到「答卷记录」和「项目人员」工作表，请核验后重试")
-        elif not node_bin:
-            st.error("未检测到系统 Node.js 运行环境，无法执行统计脚本")
         else:
-            ensure_node_modules()
-            with st.status("正在沙盒中安全调用原版 Node.js 统计引擎...", expanded=True) as status:
+            with st.status("正在沙盒中安全调用 Python 原生统计引擎...", expanded=True) as status:
                 st.write("1. 搭建隔离沙盒...")
                 with tempfile.TemporaryDirectory() as temp_dir:
                     for uf in uploaded_files:
@@ -1144,21 +1120,23 @@ if current_module == MODULE_SHANGYAO:
                             f.write(uf.getvalue())
                         st.write(f"   输入文件入库: `{uf.name}`")
 
-                    js_src = os.path.join(ROOT_DIR, "上药报表统计", "统计报表.js")
-                    js_dst = os.path.join(temp_dir, "统计报表.js")
-                    shutil.copy2(js_src, js_dst)
+                    py_src = os.path.join(ROOT_DIR, "上药报表统计", "统计报表.py")
+                    py_dst = os.path.join(temp_dir, "统计报表.py")
+                    shutil.copy2(py_src, py_dst)
 
                     env = os.environ.copy()
-                    env["NODE_PATH"] = os.path.join(ROOT_DIR, "node_modules")
+                    env["PYTHONIOENCODING"] = "utf-8"
+                    env["PYTHONUTF8"] = "1"
 
-                    st.write("2. 执行原版统计报表脚本...")
+                    st.write("2. 执行 Python 统计报表脚本...")
                     proc = subprocess.run(
-                        [node_bin, "统计报表.js"],
+                        [sys.executable, "统计报表.py"],
                         cwd=temp_dir,
                         env=env,
                         capture_output=True,
                         text=True,
-                        encoding="utf-8"
+                        encoding="utf-8",
+                        errors="replace"
                     )
 
                     output_file = os.path.join(temp_dir, "统计总表.xlsx")
