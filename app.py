@@ -822,6 +822,17 @@ SVG_BRAND_SIDEBAR = """
 </svg>
 """
 
+SVG_HOSPITAL_SAAS = """
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 21h18"/>
+    <path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/>
+    <path d="M9 21v-4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v4"/>
+    <line x1="10" y1="9" x2="14" y2="9"/>
+    <line x1="12" y1="7" x2="12" y2="11"/>
+</svg>
+"""
+
+
 
 # -------------------------------------------------------------
 # 辅助函数
@@ -968,13 +979,21 @@ MODULE_SHANGYAO = "上药雷允上进度表"
 MODULE_CORPUS = "语料库电签信息表"
 MODULE_ZHENGHE = "北京整合-上药雷允上结算包"
 MODULE_JUMEI = "陈菊梅基金会-雷允上结算包"
+MODULE_SAAS = "老Saas医院导入模板"
 
 MODULE_OPTIONS = [
     MODULE_SHANGYAO,
     MODULE_CORPUS,
     MODULE_ZHENGHE,
-    MODULE_JUMEI
+    MODULE_JUMEI,
+    MODULE_SAAS
 ]
+
+@st.cache_resource(show_spinner="正在载入全国 49.4 万医院等级知识库与检索引擎...")
+def get_hospital_matcher():
+    """单例全局缓存全国 49.4 万医院知识库，秒级常驻内存，免重复初始化"""
+    from 老Saas医院导入模板.hospital_grade_tool import HospitalGradeMatcher
+    return HospitalGradeMatcher()
 
 if "current_module" not in st.session_state or st.session_state["current_module"] not in MODULE_OPTIONS:
     st.session_state["current_module"] = MODULE_SHANGYAO
@@ -1011,7 +1030,7 @@ with st.sidebar:
     st.sidebar.markdown("##### 系统环境状态")
     render_html(f'<span class="ios-badge-success">Python {sys.version.split()[0]} 原生全栈引擎</span>', container=st.sidebar)
     render_html('<span class="ios-badge-success">7天免密保护中</span>', container=st.sidebar)
-    render_html('<span class="ios-badge-success">4大业务模块就绪</span>', container=st.sidebar)
+    render_html('<span class="ios-badge-success">5大业务模块就绪</span>', container=st.sidebar)
 
 
 current_module = st.session_state["current_module"]
@@ -1841,4 +1860,360 @@ elif current_module == MODULE_JUMEI:
                         shutil.rmtree(temp_dir)
                     except Exception:
                         pass
+
+
+# =============================================================
+# 模块五：老Saas医院导入模板
+# =============================================================
+elif current_module == MODULE_SAAS:
+    render_html(f"""
+    <div class="ios-hero-banner">
+        <div class="ios-hero-left">
+            <div class="ios-hero-icon-badge">
+                {SVG_HOSPITAL_SAAS}
+            </div>
+            <div>
+                <div class="ios-hero-title">{MODULE_SAAS}</div>
+                <div class="ios-hero-subtitle">全国 49.4 万全量医疗机构智能匹配、自动规整标准 10 级医院等级，支持批量处理与 300 条/批智能切分。</div>
+            </div>
+        </div>
+        <div class="ios-hero-pill">
+            <span class="ios-hero-pill-dot"></span>
+            49.4万 超级知识库
+        </div>
+    </div>
+    """)
+
+    render_html("""
+    <div class="bento-req-container">
+        <div class="bento-req-header">
+            <div class="bento-req-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+                <span>导入规范与智能匹配标准</span>
+            </div>
+            <div class="bento-req-badge">全国49.4万机构 · 10项标准定级 · 300条智能分批</div>
+        </div>
+        <div class="bento-req-grid">
+            <div class="bento-card">
+                <div class="bento-card-num">01</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">标准字段识别 <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">表格首行需包含「机构名称」或「医院名称」，支持「省」、「市」辅助精确定位</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">02</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">10级标准自动定级 <span class="req-tag-must">规范</span></div>
+                    <div class="bento-card-desc">严格符合系统下拉约束：无等级、一/二/三级医院、甲等/乙等</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">03</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">洗稿去重与 300条分批 <span class="req-tag-opt">自动化</span></div>
+                    <div class="bento-card-desc">智能剔除知识库中已有机构与自身重复，仅对全新机构定级并切分导入</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """)
+
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+    tab_batch, tab_single = st.tabs(["批量 Excel 导入补齐与切分", "单家机构等级即时检索"])
+
+    with tab_single:
+        st.markdown("##### 单家医院/医疗机构等级快速检索")
+        st.caption("即时查询全国 49.4 万医疗机构等级数据库，支持全称、简称、去括号归一化及联网多级检索。")
+        col_q1, col_q2, col_q3 = st.columns([2, 1, 1])
+        with col_q1:
+            q_hosp = st.text_input("输入医院或机构名称", placeholder="例如：成都市第三人民医院 / 四川大学华西医院", key="q_hosp_input")
+        with col_q2:
+            q_prov = st.text_input("省份 (可选)", placeholder="如：四川省", key="q_hosp_prov")
+        with col_q3:
+            q_city = st.text_input("城市 (可选)", placeholder="如：成都市", key="q_hosp_city")
+
+        if st.button("立即查询机构等级", key="btn_single_query", type="secondary"):
+            if not q_hosp.strip():
+                st.warning("请输入机构或医院名称")
+            else:
+                with st.spinner("正在检索 49.4 万全国医疗知识库..."):
+                    matcher = get_hospital_matcher()
+                    grade, reason = matcher.get_grade(q_hosp, q_prov, q_city, enable_online_search=True)
+                    st.success(f"检索完成！机构名称: **{q_hosp.strip()}**")
+                    col_res1, col_res2 = st.columns(2)
+                    with col_res1:
+                        render_html(f"""
+                        <div class="ios-status-card success">
+                            <div class="ios-status-card-title">标准评定等级</div>
+                            <div class="ios-status-card-val" style="font-size: 1.3rem; color: #0284c7;">{grade}</div>
+                        </div>
+                        """)
+                    with col_res2:
+                        render_html(f"""
+                        <div class="ios-status-card success">
+                            <div class="ios-status-card-title">命中规则与来源</div>
+                            <div class="ios-status-card-val">{reason}</div>
+                        </div>
+                        """)
+
+    with tab_batch:
+        uploaded_saas_file = st.file_uploader(
+            "拖拽或点击上传待处理的医院 Excel 文件 (.xlsx)",
+            type=["xlsx"],
+            key="upload_saas_excel"
+        )
+
+        # 洗稿去重配置面板 (以系统 49.4 万全量在库为唯一权威基准)
+        with st.expander("🧼 洗稿与增量去重设置（凡系统 49.4 万在库医院直接剔除）", expanded=True):
+            render_html("""
+            <div style="background: rgba(2, 132, 199, 0.06); border: 1px solid rgba(2, 132, 199, 0.18); border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; font-size: 0.88rem; line-height: 1.6; color: #0369a1;">
+                <strong>💡 系统在库比对权威基准：</strong>
+                全国 <strong>49.4 万系统已有全量医院库</strong>（已 100% 完整收录包含全部 494,022 条在库机构与历史导入模板）。<br/>
+                凡是在这 <strong>49.4 万条系统已有医院</strong> 中有记录的机构，洗稿时<strong>一律自动直接剔除</strong>，仅保留全新未收录的医院，避免老 SaaS 重复导入冲突！
+            </div>
+            """)
+            col_dd1, col_dd2 = st.columns(2)
+            with col_dd1:
+                enable_dedup = st.checkbox(
+                    "开启「洗稿去重」功能（直接剔除 49.4 万在库已有医院，仅保留新机构）",
+                    value=True,
+                    help="凡是在系统 49.4 万全量库中已存在的机构，系统将自动剔除，仅为全新机构补齐等级并切分导入。"
+                )
+            with col_dd2:
+                dedup_internal = st.checkbox(
+                    "同时剔除上传表格内部的自身同名重复项",
+                    value=True,
+                    help="若上传的 Excel 内部有多行指向同一家医院，仅保留首行，后续行作为内部重复剔除。"
+                )
+
+        selected_dedup_mode = "49.4w"
+
+        col_opt1, col_opt2 = st.columns(2)
+        with col_opt1:
+            batch_split_size = st.slider(
+                "单批次切分行数 (每批最大条数)",
+                min_value=100,
+                max_value=1000,
+                value=300,
+                step=50,
+                help="老SaaS系统后台限制通常为 300 条/批。若无需切分可后续只下载全量表。"
+            )
+        with col_opt2:
+            enable_online_chk = st.checkbox(
+                "启用重点公立医院在线联网复核",
+                value=True,
+                help="若全国历史知识库缺失等级的公立医院，自动联网搜索核验并持久化学习"
+            )
+
+        # 操作按钮黄金居中排布（文字必须严格与模块名称完全一致！）
+        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+        _, col_btn, _ = st.columns([1, 1.8, 1])
+        with col_btn:
+            start_saas = st.button(f"开始生成：{MODULE_SAAS}", type="primary", use_container_width=True)
+
+        if start_saas:
+            if not uploaded_saas_file:
+                st.error("请先上传待处理的医院 Excel 表格后再点击开始生成。")
+            else:
+                with st.status(f"正在启动【{MODULE_SAAS}】智能处理引擎...", expanded=True) as status:
+                    st.write("1. 正在准备沙箱隔离执行环境...")
+                    temp_dir = tempfile.mkdtemp(prefix="saas_hosp_")
+                    try:
+                        in_file_path = os.path.join(temp_dir, uploaded_saas_file.name)
+                        with open(in_file_path, "wb") as f:
+                            f.write(uploaded_saas_file.getvalue())
+
+                        st.write("2. 正在载入全国 49.4 万医疗机构知识库与双引擎索引...")
+                        matcher = get_hospital_matcher()
+
+                        st.write("3. 正在逐行进行多级智能定级、洗稿去重与标准下拉菜单规范化...")
+                        prog_bar = st.progress(0, text="正在处理数据行...")
+
+                        def update_progress(curr, total):
+                            pct = min(curr / max(total, 1), 1.0)
+                            prog_bar.progress(pct, text=f"已匹配完成 {curr}/{total} 条 ({(pct*100):.1f}%)")
+
+                        out_file_name = f"已补充等级_{uploaded_saas_file.name}"
+                        out_file_path = os.path.join(temp_dir, out_file_name)
+
+                        res = matcher.process_excel(
+                            input_excel=in_file_path,
+                            output_excel=out_file_path,
+                            split_size=batch_split_size if batch_split_size > 0 else None,
+                            enable_online=enable_online_chk,
+                            progress_callback=update_progress,
+                            enable_dedup=enable_dedup,
+                            dedup_mode=selected_dedup_mode,
+                            dedup_internal=dedup_internal
+                        )
+
+                        if res:
+                            dedup_stats = res.get("dedup_stats")
+                            total_rows = res["total_rows"]
+                            grade_counts = res["grade_counts"]
+                            batch_files = res["batch_files"]
+                            elapsed = res["elapsed"]
+
+                            # 读取已剔除机构名单
+                            excluded_bytes = None
+                            df_excluded = None
+                            if dedup_stats and dedup_stats.get("output_excluded_excel") and os.path.exists(dedup_stats["output_excluded_excel"]):
+                                try:
+                                    with open(dedup_stats["output_excluded_excel"], "rb") as ef:
+                                        excluded_bytes = ef.read()
+                                    df_excluded = pd.read_excel(io.BytesIO(excluded_bytes))
+                                except Exception:
+                                    pass
+
+                            # 情况 A: 如果所有数据都被剔除了（无新数据导入）
+                            if total_rows == 0:
+                                prog_bar.progress(1.0, text="洗稿完成！")
+                                status.update(label="洗稿完成：所有机构均已在系统 49.4 万在库中存在", state="complete")
+                                st.info(f"💡 洗稿去重提示：您上传的 {dedup_stats['total_input']} 家机构已全部在系统 49.4 万在库医院中收录，未发现全新机构，无需生成导入批次。")
+
+                                k1, k2, k3 = st.columns(3)
+                                with k1:
+                                    st.metric("原始上传总数", f"{dedup_stats['total_input']:,} 家")
+                                with k2:
+                                    st.metric("系统已有机构", f"{dedup_stats['excluded_kb_count']:,} 家", "49.4万库已在库", delta_color="inverse")
+                                with k3:
+                                    st.metric("表格自身重复", f"{dedup_stats['excluded_internal_count']:,} 家")
+
+                                if excluded_bytes:
+                                    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+                                    _, col_dl_ex, _ = st.columns([1, 1.8, 1])
+                                    with col_dl_ex:
+                                        st.download_button(
+                                            label=f"🚫 下载【已剔除系统已有机构名单.xlsx】 ({format_size(len(excluded_bytes))})",
+                                            data=excluded_bytes,
+                                            file_name=f"已剔除系统已有机构名单_{uploaded_saas_file.name}",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            use_container_width=True,
+                                            type="primary"
+                                        )
+                                if df_excluded is not None and not df_excluded.empty:
+                                    with st.expander(f"查看已剔除系统已有机构明细 (共 {len(df_excluded)} 家，展示前 100 行)", expanded=True):
+                                        st.dataframe(df_excluded.head(100), use_container_width=True)
+
+                            elif os.path.exists(out_file_path):
+                                prog_bar.progress(1.0, text="处理完毕！")
+                                status.update(label="洗稿过滤与医院等级补充全部完成！", state="complete")
+
+                                with open(out_file_path, "rb") as f:
+                                    filled_excel_bytes = f.read()
+
+                                rated_count = sum(v for k, v in grade_counts.items() if k != '无等级')
+
+                                if dedup_stats:
+                                    st.success(f"🎉 成功完成洗稿去重与全新机构等级补充！原始上传 {dedup_stats['total_input']} 家，剔除系统已有/重复 {dedup_stats['total_excluded']} 家，保留并补充 {total_rows} 家全新待导入机构，耗时 {elapsed} 秒。")
+                                    # 5 列 KPI 看板
+                                    st.markdown("##### 核心洗稿与处理指标看板")
+                                    k1, k2, k3, k4, k5 = st.columns(5)
+                                    with k1:
+                                        st.metric("原始上传行数", f"{dedup_stats['total_input']:,} 家")
+                                    with k2:
+                                        st.metric("剔除系统已有", f"{dedup_stats['excluded_kb_count']:,} 家", delta=f"-{dedup_stats['excluded_kb_count']} (49.4万库)", delta_color="inverse")
+                                    with k3:
+                                        st.metric("剔除自身重复", f"{dedup_stats['excluded_internal_count']:,} 家", delta=f"-{dedup_stats['excluded_internal_count']}", delta_color="inverse")
+                                    with k4:
+                                        st.metric("保留全新机构", f"{total_rows:,} 家", delta="待导入老SaaS")
+                                    with k5:
+                                        st.metric("切分导入批次", f"{len(batch_files)} 个批次包" if batch_files else "未切分")
+                                else:
+                                    st.success(f"🎉 成功完成 {total_rows} 家机构的等级智能识别与切分！耗时 {elapsed} 秒。")
+                                    st.markdown("##### 核心处理指标看板")
+                                    k1, k2, k3, k4 = st.columns(4)
+                                    with k1:
+                                        st.metric("处理机构总数", f"{total_rows:,} 家")
+                                    with k2:
+                                        st.metric("有等级机构数", f"{rated_count:,} 家", f"定级率 {rated_count/max(total_rows,1)*100:.1f}%")
+                                    with k3:
+                                        st.metric("切分批次数", f"{len(batch_files)} 个分批文件" if batch_files else "未切分")
+                                    with k4:
+                                        st.metric("引擎检索耗时", f"{elapsed} 秒")
+
+                                # 等级分布展示
+                                with st.expander("查看本次各等级评定分布统计", expanded=False):
+                                    df_dist = pd.DataFrame([
+                                        {"医院等级": k, "机构数量": v, "占比": f"{v/max(total_rows,1)*100:.2f}%"}
+                                        for k, v in grade_counts.items() if v > 0
+                                    ])
+                                    st.dataframe(df_dist, use_container_width=True, hide_index=True)
+
+                                # 打包 ZIP
+                                zip_bytes = None
+                                zip_name = f"老Saas医院导入_分批包_{len(batch_files)}批_{total_rows}条.zip"
+                                if batch_files:
+                                    zip_buffer = io.BytesIO()
+                                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                                        zf.write(out_file_path, arcname=out_file_name)
+                                        for bf in batch_files:
+                                            zf.write(bf, arcname=os.path.join(f"分批导入_每批{batch_split_size}条", os.path.basename(bf)))
+                                        if excluded_bytes and dedup_stats and dedup_stats["total_excluded"] > 0:
+                                            zf.write(dedup_stats["output_excluded_excel"], arcname="已剔除系统已有机构名单.xlsx")
+                                    zip_bytes = zip_buffer.getvalue()
+
+                                # 居中下载按钮组
+                                st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+                                if zip_bytes:
+                                    _, col_dl_zip, _ = st.columns([1, 1.8, 1])
+                                    with col_dl_zip:
+                                        st.download_button(
+                                            label=f"📦 下载全部切分批次完整压缩包 ({format_size(len(zip_bytes))})",
+                                            data=zip_bytes,
+                                            file_name=zip_name,
+                                            mime="application/zip",
+                                            use_container_width=True,
+                                            type="primary"
+                                        )
+
+                                _, col_dl_excel, _ = st.columns([1, 1.8, 1])
+                                with col_dl_excel:
+                                    st.download_button(
+                                        label=f"📄 下载洗稿后全新机构已定级表格 (.xlsx) ({format_size(len(filled_excel_bytes))})",
+                                        data=filled_excel_bytes,
+                                        file_name=out_file_name,
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        use_container_width=True
+                                    )
+
+                                if excluded_bytes and dedup_stats and dedup_stats["total_excluded"] > 0:
+                                    _, col_dl_ex, _ = st.columns([1, 1.8, 1])
+                                    with col_dl_ex:
+                                        st.download_button(
+                                            label=f"🚫 下载【已剔除系统已有机构名单.xlsx】 ({format_size(len(excluded_bytes))})",
+                                            data=excluded_bytes,
+                                            file_name=f"已剔除系统已有机构名单_{uploaded_saas_file.name}",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            use_container_width=True
+                                        )
+
+                                # 在线数据预览
+                                st.markdown("##### 洗稿后全新机构数据预览 (前 100 行)")
+                                try:
+                                    df_preview = pd.read_excel(io.BytesIO(filled_excel_bytes), nrows=100)
+                                    st.dataframe(df_preview, use_container_width=True)
+                                except Exception as e:
+                                    st.caption(f"预览加载失败: {e}")
+
+                                if df_excluded is not None and not df_excluded.empty:
+                                    with st.expander(f"查看已剔除系统已有机构名单 (共 {len(df_excluded)} 行，展示前 100 行)", expanded=False):
+                                        st.dataframe(df_excluded.head(100), use_container_width=True)
+
+                        else:
+                            status.update(label="处理失败", state="error")
+                            st.error("处理 Excel 表格失败，请检查文件首行是否包含「机构名称」或「医院名称」列。")
+
+                    except Exception as e:
+                        status.update(label="处理异常", state="error")
+                        st.error(f"处理数据时发生异常: {str(e)}")
+                    finally:
+                        try:
+                            shutil.rmtree(temp_dir)
+                        except Exception:
+                            pass
+
+
 
