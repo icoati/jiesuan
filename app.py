@@ -845,8 +845,13 @@ def create_zip_archive(files_dict: dict) -> bytes:
 # -------------------------------------------------------------
 # 门禁控制：7 天内免密持久化引擎 (LocalStorage + HMAC Token)
 # -------------------------------------------------------------
-SYSTEM_PASSWORD = "910104"
-AUTH_SALT = "medical_settlement_cloud_salt_2026_secure"
+# 支持通过 Streamlit Secrets 或环境变量自定义密码，避免将真实密码暴露在公共仓库中
+try:
+    SYSTEM_PASSWORD = str(st.secrets.get("SYSTEM_PASSWORD", os.getenv("SYSTEM_PASSWORD", "910104"))).strip()
+    AUTH_SALT = str(st.secrets.get("AUTH_SALT", "medical_settlement_cloud_salt_2026_secure")).strip()
+except Exception:
+    SYSTEM_PASSWORD = os.getenv("SYSTEM_PASSWORD", "910104")
+    AUTH_SALT = "medical_settlement_cloud_salt_2026_secure"
 
 def generate_auth_token(expiry_ts: int) -> str:
     """生成具备防篡改特性的认证 Token"""
@@ -955,17 +960,17 @@ if not st.session_state["authenticated"]:
 
 
 # -------------------------------------------------------------
-# 业务功能定义（正式更名：上药雷允上进度表）
+# 业务功能定义
 # -------------------------------------------------------------
 MODULE_SHANGYAO = "上药雷允上进度表"
-MODULE_ZHENGHE = "医生劳务费一键结算（语料库）"
-MODULE_CORPUS = "语料库电签一键结算（语料库）"
+MODULE_CORPUS = "语料库电签信息表"
+MODULE_ZHENGHE = "北京整合-上药雷允上结算包"
 MODULE_JUMEI = "陈菊梅基金会-雷允上结算包"
 
 MODULE_OPTIONS = [
     MODULE_SHANGYAO,
-    MODULE_ZHENGHE,
     MODULE_CORPUS,
+    MODULE_ZHENGHE,
     MODULE_JUMEI
 ]
 
@@ -1196,7 +1201,7 @@ if current_module == MODULE_SHANGYAO:
 
 
 # =============================================================
-# 模块二：医生劳务费一键结算（语料库）
+# 模块三：北京整合-上药雷允上结算包
 # =============================================================
 elif current_module == MODULE_ZHENGHE:
     render_html(f"""
@@ -1274,7 +1279,7 @@ elif current_module == MODULE_ZHENGHE:
         if not file_yl:
             st.error("请先上传【1. 结算明细文件】")
         else:
-            with st.status("正在沙盒中执行医生劳务费结算逻辑...", expanded=True) as status:
+            with st.status("正在沙盒中执行北京整合-上药雷允上结算逻辑...", expanded=True) as status:
                 st.write("1. 正在初始化沙盒...")
                 with tempfile.TemporaryDirectory() as temp_dir:
                     yl_path = os.path.join(temp_dir, file_yl.name)
@@ -1382,7 +1387,7 @@ print("SUCCESS_OUT2:" + str(out2))
 
 
 # =============================================================
-# 模块三：语料库电签一键结算（语料库）
+# 模块二：语料库电签信息表
 # =============================================================
 elif current_module == MODULE_CORPUS:
     render_html(f"""

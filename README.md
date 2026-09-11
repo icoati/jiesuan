@@ -12,8 +12,8 @@
 | 模块名称 | 核心驱动 | 输入文件要求 | 输出结果 |
 | :--- | :--- | :--- | :--- |
 | **模块 1：项目进度统计与案例汇总** | Python (`统计报表.py`) | 2 个 Excel（答卷记录表、人员列表） | `统计总表.xlsx`（包含统计汇总、人员维度、案例维度） |
-| **模块 2：劳务费用核算与明细拆分** | Python (`settlement_mac.py`) | 1 个必选 Excel（明细）+ 1 个可选 Excel（确认单） | `劳务明细总表_*.xlsx`、`任务明细表_*.xlsx`、ZIP 打包 |
-| **模块 3：对账清算与凭据核验系统** | Python (`settlement_tool.py`) | 3 个 Excel/XLS（支付清单、数据明细、用户明细） | `最终.xlsx`、`最终.xls`、对账筛选表、待核查告警名单、ZIP 打包 |
+| **模块 2：对账清算与凭据核验系统** | Python (`settlement_tool.py`) | 3 个 Excel/XLS（支付清单、数据明细、用户明细） | `最终.xlsx`、`最终.xls`、对账筛选表、待核查告警名单、ZIP 打包 |
+| **模块 3：劳务费用核算与明细拆分** | Python (`settlement_mac.py`) | 1 个必选 Excel（明细）+ 1 个可选 Excel（确认单） | `劳务明细总表_*.xlsx`、`任务明细表_*.xlsx`、ZIP 打包 |
 | **模块 4：多源数据归档与综合结算包** | Python (`generate_settlement.py`) | 3 个 Excel（项目进度表、数据明细表、用户明细表） | `YYYYMMDD-劳务费用明细表.xlsx`（含汇总明细、分项目明细、对账总表） |
 
 ---
