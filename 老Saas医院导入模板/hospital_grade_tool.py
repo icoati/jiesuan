@@ -32,7 +32,12 @@ import sqlite3
 import urllib.parse
 import argparse
 import requests
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    BeautifulSoup = None
+    HAS_BS4 = False
 import openpyxl
 from openpyxl.worksheet.datavalidation import DataValidation
 
@@ -242,9 +247,23 @@ class HospitalGradeMatcher:
         try:
             r = requests.get(url, headers=self.headers, timeout=5)
             if r.status_code == 200:
-                soup = BeautifulSoup(r.text, 'html.parser')
-                for res in soup.find_all('li', class_='res-list')[:6]:
-                    txt = res.get_text(separator=' ', strip=True)
+                html = r.text
+                items = []
+                if HAS_BS4 and BeautifulSoup:
+                    try:
+                        soup = BeautifulSoup(html, 'html.parser')
+                        items = [res.get_text(separator=' ', strip=True) for res in soup.find_all('li', class_='res-list')[:6]]
+                    except Exception:
+                        items = []
+                if not items:
+                    # 纯内置正则降级解析，无需依赖 bs4
+                    raw_items = re.findall(r'<li[^>]*class=["\'][^"\']*res-list[^"\']*["\'][^>]*>(.*?)</li>', html, re.S)[:6]
+                    for it in raw_items:
+                        items.append(re.sub(r'<[^>]+>', ' ', it).strip())
+                    if not items:
+                        items = [re.sub(r'<[^>]+>', ' ', html)]
+
+                for txt in items:
                     m = re.search(r'(三级甲等|三级乙等|三级丙等|二级甲等|二级乙等|二级丙等|一级甲等|一级乙等|三甲|二甲|二乙|三乙|一甲|一级综合|二级综合|三级综合|未定级)', txt)
                     if m:
                         grade_token = m.group(1)
