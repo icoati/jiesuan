@@ -1269,7 +1269,7 @@ elif current_module == MODULE_ZHENGHE:
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
                 <span>源文件规范与自动识别要求</span>
             </div>
-            <div class="bento-req-badge">列序自适应 · 防格式失真</div>
+            <div class="bento-req-badge">多表智能嗅探 · 自动对齐</div>
         </div>
         <div class="bento-req-grid">
             <div class="bento-card">
@@ -1290,47 +1290,84 @@ elif current_module == MODULE_ZHENGHE:
     </div>
     """)
 
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        file_yl = st.file_uploader(
-            "1. 结算明细文件 (*必选)",
-            type=["xlsx", "xls"],
-            key="upload_yl"
-        )
-    with col_f2:
-        file_task = st.file_uploader(
-            "2. 辅助任务明细/确认单 (可选)",
-            type=["xlsx", "xls"],
-            key="upload_task"
-        )
+    uploaded_zhenghe_files = st.file_uploader(
+        "拖拽或批量选择上传源表格 (.xlsx / .xls，支持同时上传结算明细与辅助确认单)",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="upload_zhenghe"
+    )
 
-    if file_yl:
-        try:
-            xl_yl = pd.ExcelFile(io.BytesIO(file_yl.getvalue()))
-            render_html(f'<span class="ios-badge-success">结算主明细已加载（包含工作表：{", ".join(xl_yl.sheet_names[:3])}）</span>')
-        except Exception:
-            pass
+    # 智能实时预识别嗅探
+    file_yl_obj = None
+    file_task_obj = None
+
+    if uploaded_zhenghe_files:
+        # 第一轮：按文件名强特征优先匹配
+        for uf in uploaded_zhenghe_files:
+            fname = uf.name.lower()
+            if any(k in fname for k in ["任务明细", "确认单", "js-", "核验", "对账"]):
+                if not file_task_obj:
+                    file_task_obj = uf
+            elif any(k in fname for k in ["语料", "结算明细", "明细", "结算", "上药", "雷允上"]):
+                if not file_yl_obj:
+                    file_yl_obj = uf
+
+        # 第二轮：表头探测
+        for uf in uploaded_zhenghe_files:
+            if uf in [file_yl_obj, file_task_obj]:
+                continue
+            try:
+                df_head = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=2)
+                h_str = "".join([str(c) for c in df_head.columns])
+                if not file_task_obj and ("任务名称" in h_str or "课程名称" in h_str or "确认单" in h_str):
+                    file_task_obj = uf
+                elif not file_yl_obj and ("医生" in h_str or "姓名" in h_str or "单价" in h_str or "卡号" in h_str or "银行" in h_str):
+                    file_yl_obj = uf
+            except Exception:
+                pass
+
+        # 兜底匹配：若只上传了 1 个文件且未识别，默认为结算主明细
+        if not file_yl_obj and len(uploaded_zhenghe_files) == 1:
+            file_yl_obj = uploaded_zhenghe_files[0]
+        elif not file_yl_obj and uploaded_zhenghe_files:
+            for uf in uploaded_zhenghe_files:
+                if uf != file_task_obj:
+                    file_yl_obj = uf
+                    break
+
+        st.markdown("##### 实时文件嗅探匹配结果")
+        c1, c2 = st.columns(2)
+        with c1:
+            if file_yl_obj:
+                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">01 结算明细文件 (*必选)</div><div class="ios-status-card-val">{file_yl_obj.name}</div></div>')
+            else:
+                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">01 结算明细文件 (*必选)</div><div class="ios-status-card-val">未识别 (需包含“明细/语料/结算”)</div></div>')
+        with c2:
+            if file_task_obj:
+                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">02 辅助任务明细/确认单 (可选)</div><div class="ios-status-card-val">{file_task_obj.name}</div></div>')
+            else:
+                render_html('<div class="ios-status-card neutral"><div class="ios-status-card-title">02 辅助任务明细/确认单 (可选)</div><div class="ios-status-card-val">未提供 (将直接根据主明细加总)</div></div>')
 
     _, col_btn, _ = st.columns([1, 1.8, 1])
     with col_btn:
         run_btn = st.button(f"开始生成：{MODULE_ZHENGHE}", type="primary", use_container_width=True)
 
     if run_btn:
-        if not file_yl:
-            st.error("请先上传【1. 结算明细文件】")
+        if not file_yl_obj:
+            st.error("请先上传【01. 结算明细文件】（必选）后再点击开始生成。")
         else:
             with st.status("正在沙盒中执行北京整合-上药雷允上结算逻辑...", expanded=True) as status:
                 st.write("1. 正在初始化沙盒...")
                 with tempfile.TemporaryDirectory() as temp_dir:
-                    yl_path = os.path.join(temp_dir, file_yl.name)
+                    yl_path = os.path.join(temp_dir, file_yl_obj.name)
                     with open(yl_path, "wb") as f:
-                        f.write(file_yl.getvalue())
+                        f.write(file_yl_obj.getvalue())
 
                     task_path = None
-                    if file_task:
-                        task_path = os.path.join(temp_dir, file_task.name)
+                    if file_task_obj:
+                        task_path = os.path.join(temp_dir, file_task_obj.name)
                         with open(task_path, "wb") as f:
-                            f.write(file_task.getvalue())
+                            f.write(file_task_obj.getvalue())
 
                     st.write("2. 调度原版结算审计引擎...")
                     script_dir = os.path.join(ROOT_DIR, "整合学会统计")
@@ -1372,8 +1409,11 @@ print("SUCCESS_OUT2:" + str(out2))
                     )
 
                     gen_files = {}
+                    ignore_names = [file_yl_obj.name]
+                    if file_task_obj:
+                        ignore_names.append(file_task_obj.name)
                     for p in Path(temp_dir).glob("*.xlsx"):
-                        if p.name not in [file_yl.name, getattr(file_task, 'name', '')]:
+                        if p.name not in ignore_names:
                             with open(p, "rb") as f:
                                 gen_files[p.name] = f.read()
 
