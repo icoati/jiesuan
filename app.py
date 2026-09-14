@@ -840,6 +840,14 @@ SVG_BEIJIAN_SETTLE = """
 </svg>
 """
 
+SVG_KOPU_VIDEO = """
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polygon points="23 7 16 12 23 17 23 7"/>
+    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+    <circle cx="8.5" cy="12" r="2.5"/>
+</svg>
+"""
+
 
 
 # -------------------------------------------------------------
@@ -998,6 +1006,7 @@ MODULE_ZHENGHE = "北京整合-上药雷允上结算包"
 MODULE_JUMEI = "陈菊梅基金会-雷允上结算包"
 MODULE_SAAS = "老Saas医院导入模板"
 MODULE_BEIJIAN = "北检&康恩贝结算表"
+MODULE_KOPU = "北检&华东科普视频电签表"
 
 MODULE_OPTIONS = [
     MODULE_SHANGYAO,
@@ -1005,7 +1014,8 @@ MODULE_OPTIONS = [
     MODULE_ZHENGHE,
     MODULE_JUMEI,
     MODULE_SAAS,
-    MODULE_BEIJIAN
+    MODULE_BEIJIAN,
+    MODULE_KOPU
 ]
 
 @st.cache_resource(show_spinner="正在载入全国 49.4 万医院等级知识库与检索引擎...")
@@ -1049,7 +1059,7 @@ with st.sidebar:
     st.sidebar.markdown("##### 系统环境状态")
     render_html(f'<span class="ios-badge-success">Python {sys.version.split()[0]} 原生全栈引擎</span>', container=st.sidebar)
     render_html(f'<span class="ios-badge-success">{"本地极速直达 (免密运行)" if IS_LOCAL else "云端安全防护 (7天免密)"}</span>', container=st.sidebar)
-    render_html('<span class="ios-badge-success">6大业务模块就绪</span>', container=st.sidebar)
+    render_html('<span class="ios-badge-success">7大业务模块就绪</span>', container=st.sidebar)
 
 
 current_module = st.session_state["current_module"]
@@ -2689,6 +2699,212 @@ elif current_module == MODULE_BEIJIAN:
                         shutil.rmtree(temp_dir)
                     except Exception:
                         pass
+
+
+# =============================================================
+# 模块七：北检&华东科普视频电签表
+# =============================================================
+elif current_module == MODULE_KOPU:
+    render_html(f"""
+    <div class="ios-hero-banner">
+        <div class="ios-hero-left">
+            <div class="ios-hero-icon-box">
+                {SVG_KOPU_VIDEO}
+            </div>
+            <div>
+                <div class="ios-hero-title">{MODULE_KOPU}</div>
+                <div class="ios-hero-subtitle">智能关联科普视频任务编号、视频明细与专家银行信息，严格按照第三方系统规范生成纯净版电签表。</div>
+            </div>
+        </div>
+        <div class="ios-hero-pill">
+            <span class="ios-hero-pill-dot"></span>
+            Python 电签结算内核
+        </div>
+    </div>
+    """)
+
+    render_html("""
+    <div class="bento-req-container">
+        <div class="bento-req-header">
+            <div class="bento-req-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+                <span>源文件规范与自动识别要求</span>
+            </div>
+            <div class="bento-req-badge">3 表全自动智能嗅探勾稽</div>
+        </div>
+        <div class="bento-req-grid">
+            <div class="bento-card">
+                <div class="bento-card-num">01</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">待结算任务编号表 <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">文件名含「任务编号」或「任务」，包含待结算任务的【任务明细编号】清单</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">02</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">科普视频明细表 <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">文件名含「明细」或「视频」，包含【作品编号】、【积分】、【用户名称】、【身份证号】</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">03</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">专家用户信息表 <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">文件名含「用户信息」或「用户」，包含【银行卡号】、【开户行名称】、【所在医院】、【职称】</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """)
+
+    uploaded_kopu_files = st.file_uploader(
+        "拖拽或批量选择上传源表格 (.xlsx / .xls，支持同时选择上传 3 个文件)",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="upload_kopu"
+    )
+
+    # 智能实时预识别嗅探
+    task_file_obj, detail_file_obj, user_file_obj = None, None, None
+    if uploaded_kopu_files:
+        # 第一轮：按文件名强特征优先匹配
+        for uf in uploaded_kopu_files:
+            fname = uf.name.lower()
+            if any(k in fname for k in ['任务编号', '任务', 'task']):
+                if not task_file_obj:
+                    task_file_obj = uf
+            elif any(k in fname for k in ['明细表', '明细', '作品', 'detail']):
+                if not detail_file_obj:
+                    detail_file_obj = uf
+            elif any(k in fname for k in ['用户信息', '用户', '专家', 'user', 'info']):
+                if not user_file_obj:
+                    user_file_obj = uf
+
+        # 第二轮：表头特征智能探测
+        for uf in uploaded_kopu_files:
+            if uf in [task_file_obj, detail_file_obj, user_file_obj]:
+                continue
+            try:
+                df_peek = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=2)
+                h_str = "".join([str(c) for c in df_peek.columns])
+                if not task_file_obj and ("任务明细编号" in h_str or "任务编号" in h_str):
+                    task_file_obj = uf
+                elif not detail_file_obj and ("作品编号" in h_str or "科普课件" in h_str or "课件链接" in h_str or "作品编码" in h_str):
+                    detail_file_obj = uf
+                elif not user_file_obj and ("银行卡号" in h_str or "开户行" in h_str or "支行名称" in h_str or "电签银行卡号" in h_str):
+                    user_file_obj = uf
+            except Exception:
+                pass
+
+        # 渲染识别状态指示条（与规范样式完全一致的药丸卡片）
+        render_html('<div class="ios-precheck-box"><b>智能多表嗅探识别状态：</b><br>')
+        chk_cols = st.columns(3)
+        with chk_cols[0]:
+            if task_file_obj:
+                render_html(f'<span class="ios-badge-success">1. 待结算任务编号表：已锁定</span><br><small style="opacity:0.8;">{task_file_obj.name}</small>', container=chk_cols[0])
+            else:
+                render_html('<span class="ios-badge-pending">待识别：1. 待结算任务编号表 (任务/编号)</span>', container=chk_cols[0])
+        with chk_cols[1]:
+            if detail_file_obj:
+                render_html(f'<span class="ios-badge-success">2. 科普视频明细表：已锁定</span><br><small style="opacity:0.8;">{detail_file_obj.name}</small>', container=chk_cols[1])
+            else:
+                render_html('<span class="ios-badge-pending">待识别：2. 科普视频明细表 (明细/视频)</span>', container=chk_cols[1])
+        with chk_cols[2]:
+            if user_file_obj:
+                render_html(f'<span class="ios-badge-success">3. 专家用户信息表：已锁定</span><br><small style="opacity:0.8;">{user_file_obj.name}</small>', container=chk_cols[2])
+            else:
+                render_html('<span class="ios-badge-pending">待识别：3. 专家用户信息表 (用户/专家)</span>', container=chk_cols[2])
+
+        render_html("""
+        <div style="margin: 12px 0 16px 0; padding: 12px 18px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 13px; color: #166534; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                <span><b>自动智能核算</b>：系统将直接以【任务明细编号】为准，精准勾稽视频明细与专家银行信息，输出零样式纯净版《科普电签表.xlsx》。</span>
+            </div>
+            <div style="font-size: 12px; color: #15803d; opacity: 0.85;">纯 Python 原生渲染标准导入表格</div>
+        </div>
+        """)
+
+    # 黄金比例操作按钮
+    _, col_btn, _ = st.columns([1, 1.8, 1])
+    with col_btn:
+        start_kopu = st.button(f"开始生成：{MODULE_KOPU}", type="primary", use_container_width=True)
+
+    if start_kopu:
+        if not (task_file_obj and detail_file_obj and user_file_obj):
+            st.error("未识别齐全 3 张关键表格！请确认已上传：1. 任务编号表、2. 视频明细表、3. 用户信息表。")
+        else:
+            with st.status("正在启动北检&华东科普视频电签核算引擎...", expanded=True) as status:
+                st.write("1. 正在初始化沙箱运行隔离环境...")
+                temp_dir = tempfile.mkdtemp(prefix="kopu_sign_")
+                try:
+                    t_path = os.path.join(temp_dir, task_file_obj.name)
+                    d_path = os.path.join(temp_dir, detail_file_obj.name)
+                    u_path = os.path.join(temp_dir, user_file_obj.name)
+                    with open(t_path, "wb") as f: f.write(task_file_obj.getvalue())
+                    with open(d_path, "wb") as f: f.write(detail_file_obj.getvalue())
+                    with open(u_path, "wb") as f: f.write(user_file_obj.getvalue())
+
+                    out_path = os.path.join(temp_dir, "科普电签表.xlsx")
+
+                    st.write("2. 正在执行三方勾稽对账、积分汇总、智能省市匹配与纯净表单生成...")
+                    sys.path.append(os.path.join(ROOT_DIR, "北检&华东科普视频电签表"))
+                    from generate_sign_table import generate_kopu_sign_workbook
+                    
+                    res_path, stats = generate_kopu_sign_workbook(t_path, d_path, u_path, out_path)
+
+                    if os.path.exists(out_path):
+                        status.update(label="科普电签表生成完成！", state="complete")
+                        st.success(f"成功生成纯净版《科普电签表.xlsx》！共汇总 {stats['total_doctors']} 位专家、{stats['total_tasks']} 条视频，劳务总额 ¥ {stats['total_amount']:,} 元。")
+
+                        # 核心 KPI 看板
+                        st.markdown("##### 本期结算核心 KPI 看板")
+                        k1, k2, k3, k4 = st.columns(4)
+                        with k1:
+                            st.metric("结算总人数", f"{stats['total_doctors']} 位专家")
+                        with k2:
+                            st.metric("结算任务数", f"{stats['total_tasks']} 条视频")
+                        with k3:
+                            st.metric("劳务总金额", f"¥ {stats['total_amount']:,} 元")
+                        with k4:
+                            st.metric("信息匹配率", f"{stats['matched_rate']}")
+
+                        # 下载专区
+                        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+                        with open(out_path, "rb") as ef:
+                            out_bytes = ef.read()
+
+                        _, col_dl, _ = st.columns([1, 1.8, 1])
+                        with col_dl:
+                            st.download_button(
+                                label=f"⬇️ 一键下载【科普电签表.xlsx】 ({format_size(len(out_bytes))})",
+                                data=out_bytes,
+                                file_name="科普电签表.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                type="primary",
+                                use_container_width=True
+                            )
+
+                        # 在线数据预览
+                        st.markdown("##### 📑 科普电签表数据在线预览")
+                        df_preview = pd.read_excel(io.BytesIO(out_bytes))
+                        st.caption(f"共 {len(df_preview)} 行数据（展示前 100 行）：")
+                        st.dataframe(df_preview.head(100), use_container_width=True)
+
+                    else:
+                        status.update(label="生成失败", state="error")
+                        st.error("执行过程出现错误，未能在沙箱中生成目标表格。")
+
+                except Exception as e:
+                    status.update(label="处理异常", state="error")
+                    st.error(f"处理数据时发生异常: {str(e)}")
+                finally:
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception:
+                        pass
+
 
 
 

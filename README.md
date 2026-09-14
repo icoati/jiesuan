@@ -17,6 +17,7 @@
 | **模块 4：陈菊梅基金会-雷允上结算包** | Python (`generate_settlement.py` 全自适应引擎) | 2个或3个 Excel（医生底表、语料交付表、可选进度表） | `YYYYMMDD-劳务费用明细表.xlsx`（动态单价分列、项目结算表、各单价明细表） |
 | **模块 5：老Saas医院导入模板** | Python (`hospital_grade_tool.py`) | 1 个医院管理 Excel 导入表 | 洗稿剔除知识库已有机构、剔除名单导出、`已补充等级_*.xlsx`、300条/批切分分批包、ZIP 打包、保留下拉验证约束 |
 | **模块 6：北检&康恩贝结算表** | Python (`generate_settlement.py`) | 3 个 Excel（待结算词条列表、专家银行卡信息、语料全量明细） | `7_专家劳务报酬明细表.xlsx`（内置个税公式）、`8_已结算语料词条明细表.xlsx`、`9_作品劳务结算总表.xlsx`、ZIP 打包 |
+| **模块 7：北检&华东科普视频电签表** | Python (`generate_sign_table.py`) | 3 个 Excel（待结算任务编号表、科普视频明细表、专家用户信息表） | `北检&华东科普视频电签表_*.xlsx`（18列标准电签格式、纯文本无样式、零渲染导入保障） |
 
 ---
 
@@ -78,16 +79,17 @@ streamlit run app.py
 ## 📁 项目目录说明
 
 ```text
-├── app.py                      # Web 统一门户主程序 (100% 纯 Python 全栈引擎)
+├── app.py                      # Web 统一门户主程序 (100% 纯 Python 全栈引擎，集成 7 大业务模块)
 ├── requirements.txt            # Python 依赖清单 (streamlit, pandas, openpyxl, xlwt, xlrd, requests, bs4)
-├── .gitignore                  # Git 忽略规则 (过滤本地超大 *.db 库)
-├── 一键启动服务.bat            # Windows 本地与局域网一键启动脚本
-├── 一键启动服务_Mac.command        # Mac 本地一键启动脚本 (自动检查 Python 与依赖)
-├── 创建Mac桌面App.command         # Mac 桌面独立应用生成器 (生成 ~/Desktop/医疗数据统计平台.app)
-├── 上药雷允上进度表/           # 模块 1 核心驱动
-├── 语料库电签信息表/           # 模块 2 核心驱动
-├── 北京整合-上药雷允上结算包/  # 模块 3 核心驱动
-├── 陈菊梅基金会-雷允上结算包/  # 模块 4 核心驱动
-├── 老Saas医院导入模板/         # 模块 5 核心驱动 (49.4万超级库与300条分批切分)
-└── 北检&康恩贝结算表/          # 模块 6 核心驱动 (三表智能核算与规范化报表生成)
+├── .gitignore                  # Git 忽略规则 (过滤本地超大 *.db 库与运行时临时文件)
+├── 一键启动服务.bat            # Windows 本地与局域网一键极速启动脚本
+├── 一键启动服务_Mac.command        # Mac 本地一键极速启动脚本 (自动检查 Python 与依赖)
+├── 创建Mac桌面App.command         # Mac 桌面独立应用快捷方式生成器
+├── 上药报表统计/               # 模块 1 核心驱动 (统计报表.py：人员/案例/汇总三维度统计)
+├── 语料库电签统计/             # 模块 2 核心驱动 (settlement_tool.py：支付清单与用户明细三方核算)
+├── 整合学会统计/               # 模块 3 核心驱动 (settlement_mac.py：北京整合劳务明细总表计算)
+├── 陈菊梅基金会-雷允上结算包/  # 模块 4 核心驱动 (generate_settlement.py：多项目自适应独立拆分与个税核销)
+├── 老Saas医院导入模板/         # 模块 5 核心驱动 (hospital_grade_tool.py：49.4万库匹配、去重与300条分批切分)
+├── 北检&康恩贝结算表/          # 模块 6 核心驱动 (generate_settlement.py：三表智能核算与规范化报表生成)
+└── 北检&华东科普视频电签表/    # 模块 7 核心驱动 (generate_sign_table.py：任务编号、视频明细与用户信息智能三方对账)
 ```
