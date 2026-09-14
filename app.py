@@ -1674,28 +1674,28 @@ elif current_module == MODULE_JUMEI:
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
                 <span>源文件规范与自动识别要求</span>
             </div>
-            <div class="bento-req-badge">3 表特征智能嗅探 · 自动对齐</div>
+            <div class="bento-req-badge">2 表极简驱动 · 智能防乱序嗅探</div>
         </div>
         <div class="bento-req-grid">
             <div class="bento-card">
                 <div class="bento-card-num">01</div>
                 <div class="bento-card-content">
-                    <div class="bento-card-title">项目进度表 <span class="req-tag-must">必须</span></div>
-                    <div class="bento-card-desc">文件名含「进度」或「雷允上」，包含语料编号、医生姓名、项目名称、结算单价等</div>
+                    <div class="bento-card-title">医生底表 / 用户列表 <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">文件名含「用户」或「医生」，包含身份证号、开户银行、支行、银行卡号、手机号</div>
                 </div>
             </div>
             <div class="bento-card">
                 <div class="bento-card-num">02</div>
                 <div class="bento-card-content">
-                    <div class="bento-card-title">语料列表 (明文) <span class="req-tag-must">必须</span></div>
-                    <div class="bento-card-desc">文件名含「语料」，包含语料词条编号、手机号、身份证号等业务明细</div>
+                    <div class="bento-card-title">语料交付表 / 进度表 <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">文件名含「语料」或「进度」，包含题目内容、结算单价、审核状态、项目名称、手机号</div>
                 </div>
             </div>
             <div class="bento-card">
                 <div class="bento-card-num">03</div>
                 <div class="bento-card-content">
-                    <div class="bento-card-title">用户列表 (明文) <span class="req-tag-must">必须</span></div>
-                    <div class="bento-card-desc">文件名含「用户」，包含身份证号、开户银行、支行、银行卡号</div>
+                    <div class="bento-card-title">辅助进度表 <span class="req-tag-opt" style="background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">可选兼容</span></div>
+                    <div class="bento-card-desc">支持传统 3 表同时上传，系统将智能优先选取完整语料交付数据进行全自适应核销</div>
                 </div>
             </div>
         </div>
@@ -1703,57 +1703,60 @@ elif current_module == MODULE_JUMEI:
     """)
 
     uploaded_jumei_files = st.file_uploader(
-        "拖拽或批量选择上传 3 个源表格 (.xlsx / .xls)",
+        "拖拽或批量选择上传源表格 (.xlsx / .xls，支持 2 表或 3 表同时上传)",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
         key="upload_jumei"
     )
 
     # 智能预识别嗅探
-    prog_name, corpus_name, user_name = None, None, None
+    doc_name, corpus_name, prog_name = None, None, None
     if uploaded_jumei_files:
         for uf in uploaded_jumei_files:
             fname = uf.name.lower()
-            if ("进度" in fname or "雷允上" in fname) and ("明文" not in fname and "费用" not in fname and "对账" not in fname and "备份" not in fname and "用户" not in fname):
-                prog_name = uf.name
+            if ("用户" in fname or "医生" in fname or "底表" in fname) and ("进度" not in fname and "语料" not in fname and "费用" not in fname):
+                doc_name = uf.name
             elif ("语料" in fname) and ("进度" not in fname and "费用" not in fname and "用户" not in fname):
                 corpus_name = uf.name
-            elif ("用户" in fname or "医生" in fname) and ("进度" not in fname and "语料" not in fname):
-                user_name = uf.name
+            elif ("进度" in fname or "雷允上" in fname) and ("明文" not in fname and "费用" not in fname and "用户" not in fname):
+                prog_name = uf.name
 
         # 内容兜底启发式探测
         for uf in uploaded_jumei_files:
-            if uf.name in [prog_name, corpus_name, user_name]:
+            if uf.name in [doc_name, corpus_name, prog_name]:
                 continue
             try:
                 df_head = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=2)
                 h_str = "".join([str(c) for c in df_head.columns])
-                if not prog_name and ("单价" in h_str or "结算单价" in h_str) and ("项目" in h_str or "医院" in h_str):
-                    prog_name = uf.name
-                elif not corpus_name and ("语料" in h_str or "词条" in h_str) and ("题目" in h_str or "手机" in h_str):
+                if not doc_name and ("开户" in h_str or "支行" in h_str or "银行卡" in h_str or "卡号" in h_str):
+                    doc_name = uf.name
+                elif not corpus_name and ("语料" in h_str or "词条" in h_str or "题目" in h_str) and ("单价" in h_str or "审核" in h_str):
                     corpus_name = uf.name
-                elif not user_name and ("开户" in h_str or "支行" in h_str or "银行卡" in h_str or "卡号" in h_str):
-                    user_name = uf.name
+                elif not prog_name and ("进度" in h_str or "项目" in h_str) and ("单价" in h_str or "审核" in h_str):
+                    prog_name = uf.name
             except Exception:
                 pass
+
+        target_corpus = corpus_name or prog_name
 
         st.markdown("##### 实时文件嗅探匹配结果")
         c1, c2, c3 = st.columns(3)
         with c1:
-            if prog_name:
-                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">01 项目进度表</div><div class="ios-status-card-val">{prog_name}</div></div>')
+            if doc_name:
+                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">01 医生底表 / 用户列表</div><div class="ios-status-card-val">{doc_name}</div></div>')
             else:
-                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">01 项目进度表</div><div class="ios-status-card-val">未识别 (需包含“进度”)</div></div>')
+                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">01 医生底表 / 用户列表</div><div class="ios-status-card-val">未识别 (需包含“用户”或“医生”)</div></div>')
         with c2:
-            if corpus_name:
-                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">02 语料列表(明文)</div><div class="ios-status-card-val">{corpus_name}</div></div>')
+            if target_corpus:
+                tag_label = "语料交付表" if target_corpus == corpus_name else "进度表(替代语料交付)"
+                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">02 {tag_label}</div><div class="ios-status-card-val">{target_corpus}</div></div>')
             else:
-                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">02 语料列表(明文)</div><div class="ios-status-card-val">未识别 (需包含“语料”)</div></div>')
+                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">02 语料交付表</div><div class="ios-status-card-val">未识别 (需包含“语料”或“进度”)</div></div>')
         with c3:
-            if user_name:
-                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">03 用户列表(明文)</div><div class="ios-status-card-val">{user_name}</div></div>')
+            if prog_name and corpus_name:
+                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">03 辅助进度表 (可选)</div><div class="ios-status-card-val">{prog_name}</div></div>')
             else:
-                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">03 用户列表(明文)</div><div class="ios-status-card-val">未识别 (需包含“用户”)</div></div>')
+                render_html('<div class="ios-status-card neutral"><div class="ios-status-card-title">03 辅助进度表 (可选)</div><div class="ios-status-card-val">无需或已自动融合</div></div>')
 
     # 操作按钮黄金居中排布
     _, col_btn, _ = st.columns([1, 1.8, 1])
@@ -1761,44 +1764,40 @@ elif current_module == MODULE_JUMEI:
         start_jumei = st.button(f"开始生成：{MODULE_JUMEI}", type="primary", use_container_width=True)
 
     if start_jumei:
-        if not uploaded_jumei_files or len(uploaded_jumei_files) < 3:
-            st.error("请上传全部 3 个源数据文件（项目进度表、语料明文表、用户明文表）后再次点击生成。")
-        elif not (prog_name and corpus_name and user_name):
-            st.warning("系统未能自动匹配全部 3 张必要表格，请确认文件名分别包含「进度/雷允上」、「语料」、「用户」关键字。")
+        target_corpus = corpus_name or prog_name
+        if not uploaded_jumei_files or len(uploaded_jumei_files) < 2:
+            st.error("请上传至少 2 个源数据文件（医生底表/用户明文表、语料交付表/进度表）后再次点击生成。")
+        elif not (doc_name and target_corpus):
+            st.warning("系统未能自动匹配必要表格，请确认上传了「用户/医生」底表与「语料/进度」交付表。")
         else:
             with st.status("正在启动陈菊梅基金会雷允上劳务结算引擎...", expanded=True) as status:
                 st.write("1. 正在初始化沙箱运行隔离环境...")
                 temp_dir = tempfile.mkdtemp(prefix="jumei_settle_")
                 try:
-                    prog_file_obj = next(f for f in uploaded_jumei_files if f.name == prog_name)
-                    corpus_file_obj = next(f for f in uploaded_jumei_files if f.name == corpus_name)
-                    user_file_obj = next(f for f in uploaded_jumei_files if f.name == user_name)
+                    doc_file_obj = next(f for f in uploaded_jumei_files if f.name == doc_name)
+                    corpus_file_obj = next(f for f in uploaded_jumei_files if f.name == target_corpus)
 
-                    p_path = os.path.join(temp_dir, prog_file_obj.name)
+                    u_path = os.path.join(temp_dir, doc_file_obj.name)
                     c_path = os.path.join(temp_dir, corpus_file_obj.name)
-                    u_path = os.path.join(temp_dir, user_file_obj.name)
 
-                    with open(p_path, "wb") as f:
-                        f.write(prog_file_obj.getvalue())
+                    with open(u_path, "wb") as f:
+                        f.write(doc_file_obj.getvalue())
                     with open(c_path, "wb") as f:
                         f.write(corpus_file_obj.getvalue())
-                    with open(u_path, "wb") as f:
-                        f.write(user_file_obj.getvalue())
 
                     today_str = datetime.datetime.now().strftime("%Y%m%d")
                     out_name = f"{today_str}-劳务费用明细表.xlsx"
                     out_path = os.path.join(temp_dir, out_name)
 
                     script_path = os.path.join(ROOT_DIR, "陈菊梅基金会-雷允上结算包", "generate_settlement.py")
-                    st.write("2. 正在执行多表模糊映射、劳务个税反算与分项目汇总...")
+                    st.write("2. 正在执行全数据驱动单价动态提取、开户行智能清洗与劳务个税核销...")
 
                     cmd = [
                         sys.executable,
                         script_path,
-                        "--prog", p_path,
+                        "--doc", u_path,
                         "--corpus", c_path,
-                        "--user", u_path,
-                        "--output", out_path
+                        "--out", out_path
                     ]
 
                     env = os.environ.copy()
@@ -1820,7 +1819,7 @@ elif current_module == MODULE_JUMEI:
                         with open(out_path, "rb") as f:
                             excel_bytes = f.read()
 
-                        st.success("成功生成劳务费用明细表，包含汇总表、各项目明细与语料对账总表！")
+                        st.success("成功生成劳务费用明细表，包含项目结算表与各单价明细表！")
 
                         # 提取 KPI 数据
                         total_items = re.search(r'共\s*(\d+)\s*条', proc.stdout)

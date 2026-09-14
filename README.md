@@ -14,8 +14,9 @@
 | **模块 1：上药雷允上进度表** | Python (`统计报表.py`) | 2 个 Excel（答卷记录表、人员列表） | `统计总表.xlsx`（包含统计汇总、人员维度、案例维度） |
 | **模块 2：语料库电签信息表** | Python (`settlement_tool.py`) | 3 个 Excel/XLS（支付清单、数据明细、用户明细） | `最终.xlsx`、`最终.xls`、对账筛选表、待核查告警名单、ZIP 打包 |
 | **模块 3：北京整合-上药雷允上结算包** | Python (`settlement_mac.py`) | 1 个必选 Excel（明细）+ 1 个可选 Excel（确认单） | `劳务明细总表_*.xlsx`、`任务明细表_*.xlsx`、ZIP 打包 |
-| **模块 4：陈菊梅基金会-雷允上结算包** | Python (`generate_settlement.py`) | 3 个 Excel（项目进度表、数据明细表、用户明细表） | `YYYYMMDD-劳务费用明细表.xlsx`（含汇总明细、分项目明细、对账总表） |
+| **模块 4：陈菊梅基金会-雷允上结算包** | Python (`generate_settlement.py` 全自适应引擎) | 2个或3个 Excel（医生底表、语料交付表、可选进度表） | `YYYYMMDD-劳务费用明细表.xlsx`（动态单价分列、项目结算表、各单价明细表） |
 | **模块 5：老Saas医院导入模板** | Python (`hospital_grade_tool.py`) | 1 个医院管理 Excel 导入表 | 洗稿剔除知识库已有机构、剔除名单导出、`已补充等级_*.xlsx`、300条/批切分分批包、ZIP 打包、保留下拉验证约束 |
+| **模块 6：北检&康恩贝结算表** | Python (`generate_settlement.py`) | 3 个 Excel（待结算词条列表、专家银行卡信息、语料全量明细） | `7_专家劳务报酬明细表.xlsx`（内置个税公式）、`8_已结算语料词条明细表.xlsx`、`9_作品劳务结算总表.xlsx`、ZIP 打包 |
 
 ---
 
@@ -80,10 +81,13 @@ streamlit run app.py
 ├── app.py                      # Web 统一门户主程序 (100% 纯 Python 全栈引擎)
 ├── requirements.txt            # Python 依赖清单 (streamlit, pandas, openpyxl, xlwt, xlrd, requests, bs4)
 ├── .gitignore                  # Git 忽略规则 (过滤本地超大 *.db 库)
-├── 一键启动服务.bat            # Windows 本机与局域网一键启动脚本
+├── 一键启动服务.bat            # Windows 本地与局域网一键启动脚本
+├── 一键启动服务_Mac.command        # Mac 本地一键启动脚本 (自动检查 Python 与依赖)
+├── 创建Mac桌面App.command         # Mac 桌面独立应用生成器 (生成 ~/Desktop/医疗数据统计平台.app)
 ├── 上药雷允上进度表/           # 模块 1 核心驱动
 ├── 语料库电签信息表/           # 模块 2 核心驱动
 ├── 北京整合-上药雷允上结算包/  # 模块 3 核心驱动
 ├── 陈菊梅基金会-雷允上结算包/  # 模块 4 核心驱动
-└── 老Saas医院导入模板/         # 模块 5 核心驱动 (49.4万超级库与300条分批切分)
+├── 老Saas医院导入模板/         # 模块 5 核心驱动 (49.4万超级库与300条分批切分)
+└── 北检&康恩贝结算表/          # 模块 6 核心驱动 (三表智能核算与规范化报表生成)
 ```
