@@ -80,6 +80,63 @@ def parse_hospital_location(hospital_name):
             return prov, city
     return '浙江省', '温州市'
 
+def format_bank_and_branch(bank_val, branch_val):
+    """
+    智能合并银行名称与支行名称形成最终开户行：
+    1. 抓取源文件中的 开户银行 + 支行名称 合并到一起，形成完整开户行；
+    2. 若两者完全相同或一方已包含另一方，智能去重，避免重复拼接（例如避免 中国银行 + 中国银行北京怀柔府前街支行 => 中国银行中国银行北京怀柔府前街支行）；
+    3. 若银行名称本身已包含完整支行（如以“支行”、“营业部”结尾），直接保留；
+    4. 规范化处理支行开头的银行简写（如 农行/工行/建行）；
+    5. 缺失其一则取非空者；
+    6. 正常情况下将【开户银行 + 支行名称】拼接输出（如 中国工商银行 + 丰益桥支行 => 中国工商银行丰益桥支行）。
+    """
+    b = str(bank_val).strip() if pd.notna(bank_val) and str(bank_val).strip() not in ['nan', 'None', '未识别'] else ''
+    br = str(branch_val).strip() if pd.notna(branch_val) and str(branch_val).strip() not in ['nan', 'None', '未识别'] else ''
+
+    if not b and not br:
+        return ''
+    if not br:
+        return b
+    if not b:
+        return br
+
+    # 1. 若两者完全一致
+    if b == br:
+        return b
+
+    # 2. 若支行已包含完整银行名称（如 银行=中国银行，支行=中国银行北京怀柔府前街支行）
+    if b in br:
+        return br
+
+    # 3. 若银行已包含完整支行名称
+    if br in b:
+        return b
+
+    # 4. 若银行名称本身已经是一个完整的支行/分行营业部（以支行、营业部结尾）
+    if b.endswith('支行') or b.endswith('营业部'):
+        return b
+
+    # 5. 处理支行中包含的常见银行简写（如 农行/工行/建行）
+    for short_b, full_b in [
+        ('工行', '中国工商银行'), ('工商银行', '中国工商银行'),
+        ('建行', '中国建设银行'), ('建设银行', '中国建设银行'),
+        ('农行', '中国农业银行'), ('农业银行', '中国农业银行'),
+        ('中行', '中国银行')
+    ]:
+        if b == full_b or b == short_b:
+            if br.startswith(short_b):
+                return b + br[len(short_b):]
+            if br.startswith(full_b):
+                return br
+
+    # 6. 处理银行与支行含相同银行主体关键词
+    for kw in ['工商银行', '建设银行', '农业银行', '中国银行', '交通银行', '民生银行', '光大银行', '招商银行', '华夏银行', '邮政储蓄银行', '北京银行', '浦发银行', '浦东发展银行']:
+        if kw in b and kw in br:
+            return br if len(br) >= len(b) else b
+
+    # 7. 银行名称 + 支行名称合并
+    return b + br
+
 # ==================== 2. 强力编号清洗器 ====================
 def normalize_id(val):
     """把各种怪异格式的语料编号/卡号转换为纯净标准字符串"""
@@ -403,6 +460,9 @@ def process_settlement(target_dir="."):
         bank_card = u_info.get(u_card_col, "")
         branch_name = u_info.get(u_branch_col, "")
         
+        # 抓取源文件中的 开户银行 + 支行名称 合并到一起，形成开户行 (智能去重与规范化)
+        full_bank = format_bank_and_branch(bank_name, branch_name)
+        
         if not bank_card:
             warnings.append(f"医生【{name}】(手机: {phone}, 身份证: {cid}) 未在用户列表中找到银行卡号！")
             
@@ -420,7 +480,7 @@ def process_settlement(target_dir="."):
             '市*': city,
             '身份证*': cid,
             '手机号*': phone,
-            '开户行*': bank_name,
+            '开户行*': full_bank,
             '银行卡号*': bank_card,
             '工作单位*': hosp,
             '医务职称*': title,
@@ -428,6 +488,7 @@ def process_settlement(target_dir="."):
             '签署日期': '',
             '签署日期1': '',
             '语料条数': count,
+            '开户银行': bank_name,
             '支行名称': branch_name
         })
         
@@ -602,7 +663,7 @@ def process_settlement(target_dir="."):
         r_vals = [
             idx, doc['姓名*'], doc['身份证*'], doc['手机号*'], doc['工作单位*'],
             doc['科室*'], doc['医务职称*'], doc['语料条数'], doc['金额*'],
-            doc['开户行*'], doc['支行名称'], doc['银行卡号*'], doc['省份*'], doc['市*'],
+            doc.get('开户银行', doc['开户行*']), doc['支行名称'], doc['银行卡号*'], doc['省份*'], doc['市*'],
             f"{doc['开始年*']}-{doc['开始月*']:02d}-{doc['开始日*']:02d}"
         ]
         for c_idx, val in enumerate(r_vals, 1):
