@@ -832,6 +832,14 @@ SVG_HOSPITAL_SAAS = """
 </svg>
 """
 
+SVG_BEIJIAN_SETTLE = """
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 11l3 3L22 4"/>
+    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+    <line x1="9" y1="18" x2="15" y2="18"/>
+</svg>
+"""
+
 
 
 # -------------------------------------------------------------
@@ -879,8 +887,17 @@ def verify_auth_token(expiry_ts: int, token: str) -> bool:
     return expected == token
 
 
+# -------------------------------------------------------------
+# 智能环境判断：本地端默认直接免密直达，云端 VPS 保持安全门禁
+# -------------------------------------------------------------
+IS_LOCAL = (
+    os.getenv("LOCAL_MODE", "").lower() in ["1", "true", "yes"] or
+    os.getenv("SKIP_AUTH", "").lower() in ["1", "true", "yes"] or
+    os.getenv("SYSTEM_PASSWORD", "").lower() in ["none", "off", "0"]
+)
+
 if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
+    st.session_state["authenticated"] = IS_LOCAL
 
 # 1. 检查 URL 中是否携带了合法的 7 天免密 Token
 url_token = st.query_params.get("auth_token", None)
@@ -980,13 +997,15 @@ MODULE_CORPUS = "语料库电签信息表"
 MODULE_ZHENGHE = "北京整合-上药雷允上结算包"
 MODULE_JUMEI = "陈菊梅基金会-雷允上结算包"
 MODULE_SAAS = "老Saas医院导入模板"
+MODULE_BEIJIAN = "北检&康恩贝结算表"
 
 MODULE_OPTIONS = [
     MODULE_SHANGYAO,
     MODULE_CORPUS,
     MODULE_ZHENGHE,
     MODULE_JUMEI,
-    MODULE_SAAS
+    MODULE_SAAS,
+    MODULE_BEIJIAN
 ]
 
 @st.cache_resource(show_spinner="正在载入全国 49.4 万医院等级知识库与检索引擎...")
@@ -1029,8 +1048,8 @@ with st.sidebar:
     st.sidebar.markdown("---")
     st.sidebar.markdown("##### 系统环境状态")
     render_html(f'<span class="ios-badge-success">Python {sys.version.split()[0]} 原生全栈引擎</span>', container=st.sidebar)
-    render_html('<span class="ios-badge-success">7天免密保护中</span>', container=st.sidebar)
-    render_html('<span class="ios-badge-success">5大业务模块就绪</span>', container=st.sidebar)
+    render_html(f'<span class="ios-badge-success">{"本地极速直达 (免密运行)" if IS_LOCAL else "云端安全防护 (7天免密)"}</span>', container=st.sidebar)
+    render_html('<span class="ios-badge-success">6大业务模块就绪</span>', container=st.sidebar)
 
 
 current_module = st.session_state["current_module"]
@@ -2214,6 +2233,297 @@ elif current_module == MODULE_SAAS:
                             shutil.rmtree(temp_dir)
                         except Exception:
                             pass
+
+
+# =============================================================
+# 模块六：北检&康恩贝结算表
+# =============================================================
+elif current_module == MODULE_BEIJIAN:
+    render_html(f"""
+    <div class="ios-hero-banner">
+        <div class="ios-hero-left">
+            <div class="ios-hero-icon-badge">
+                {SVG_BEIJIAN_SETTLE}
+            </div>
+            <div>
+                <div class="ios-hero-title">{MODULE_BEIJIAN}</div>
+                <div class="ios-hero-subtitle">智能关联待结算语料、专家银行资质与全量语料库，一键合规导出专家劳务报酬表、已结算语料明细表与作品结算总表。</div>
+            </div>
+        </div>
+        <div class="ios-hero-pill">
+            <span class="ios-hero-pill-dot"></span>
+            三表智能联动
+        </div>
+    </div>
+    """)
+
+    render_html("""
+    <div class="bento-req-container">
+        <div class="bento-req-header">
+            <div class="bento-req-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
+                <span>源文件规范与处理说明</span>
+            </div>
+            <div class="bento-req-badge">3 张源表关联核算</div>
+        </div>
+        <div class="bento-req-grid">
+            <div class="bento-card">
+                <div class="bento-card-num">01</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">待结算词条列表 (1.xlsx) <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">提供本次结算的目标【语料词条编号】清单（如 133 条待结算语料）</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">02</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">专家信息与银行卡表 (2.xlsx) <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">包含专家姓名、身份证号、银行卡号、开户银行及支行信息</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">03</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">语料库全量明细表 (3.xlsx) <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">包含语料题目内容、回答记录、医院、科室、职称、审核状态等全量数据</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """)
+
+    uploaded_files = st.file_uploader(
+        "拖拽或批量选择上传全部源表格（支持一次性将 1.xlsx、2.xlsx、3.xlsx 多表同时拖入）",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="upload_beijian_files"
+    )
+
+    # 智能实时预识别嗅探
+    file_1_obj, file_2_obj, file_3_obj = None, None, None
+    if uploaded_files:
+        # 第一轮：按文件名强特征优先匹配
+        for uf in uploaded_files:
+            fname = uf.name.lower()
+            if fname in ['1.xlsx', '1.xls'] or ('1' in fname and '待结算' in fname) or ('待结算' in fname or '结算名单' in fname or '词条名单' in fname or '语料库项目' in fname):
+                if not file_1_obj:
+                    file_1_obj = uf
+            elif fname in ['2.xlsx', '2.xls'] or ('2' in fname and ('专家' in fname or '银行' in fname)) or ('银行' in fname or '卡号' in fname or '专家' in fname or '资质' in fname or '用户' in fname):
+                if not file_2_obj:
+                    file_2_obj = uf
+            elif fname in ['3.xlsx', '3.xls'] or ('3' in fname and '明细' in fname) or ('语料明细' in fname or '全量' in fname or '原始明细' in fname):
+                if not file_3_obj:
+                    file_3_obj = uf
+
+        # 第二轮：若仍有未匹配表格，深入读取前 2 行表头内容智能识别
+        for uf in uploaded_files:
+            if uf in [file_1_obj, file_2_obj, file_3_obj]:
+                continue
+            try:
+                df_peek = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=2)
+                h_str = "".join([str(c) for c in df_peek.columns])
+                if not file_2_obj and ("银行卡" in h_str or "开户行" in h_str or "支行" in h_str):
+                    file_2_obj = uf
+                elif not file_3_obj and ("题目内容" in h_str or "回答记录" in h_str or "首次提交时间" in h_str):
+                    file_3_obj = uf
+                elif not file_1_obj and ("是否结算" in h_str or "结算单价" in h_str or "语料词条编号" in h_str):
+                    file_1_obj = uf
+            except Exception:
+                pass
+
+        # 渲染识别状态指示条
+        render_html('<div class="ios-precheck-box"><b>智能多表嗅探识别状态：</b><br>')
+        chk_cols = st.columns(3)
+        with chk_cols[0]:
+            if file_1_obj:
+                render_html(f'<span class="ios-badge-success">1. 待结算词条列表：已锁定</span><br><small style="opacity:0.8;">{file_1_obj.name}</small>', container=chk_cols[0])
+            else:
+                render_html('<span class="ios-badge-pending">待识别：1. 待结算词条列表 (1.xlsx)</span>', container=chk_cols[0])
+        with chk_cols[1]:
+            if file_2_obj:
+                render_html(f'<span class="ios-badge-success">2. 专家银行信息表：已锁定</span><br><small style="opacity:0.8;">{file_2_obj.name}</small>', container=chk_cols[1])
+            else:
+                render_html('<span class="ios-badge-pending">待识别：2. 专家银行卡信息表 (2.xlsx)</span>', container=chk_cols[1])
+        with chk_cols[2]:
+            if file_3_obj:
+                render_html(f'<span class="ios-badge-success">3. 语料全量明细表：已锁定</span><br><small style="opacity:0.8;">{file_3_obj.name}</small>', container=chk_cols[2])
+            else:
+                render_html('<span class="ios-badge-pending">待识别：3. 语料库全量明细表 (3.xlsx)</span>', container=chk_cols[2])
+
+    render_html("""
+    <div style="margin: 12px 0 16px 0; padding: 12px 18px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 13px; color: #166534; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            <span><b>自动智能核算</b>：系统将直接从上传的源文件中自动抓取各篇语料的<b>【结算单价】</b>并按待结算目标自动对齐，无需手动配置参数。</span>
+        </div>
+        <div style="font-size: 12px; color: #15803d; opacity: 0.85;">纯 Python 原生渲染标准交付表格</div>
+    </div>
+    """)
+
+    # 开始生成大按钮（与侧边栏标题 100% 一致）
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    btn_start_beijian = st.button(
+        f"开始生成：{MODULE_BEIJIAN}",
+        type="primary",
+        use_container_width=True
+    )
+
+    if btn_start_beijian:
+        if not file_1_obj or not file_2_obj or not file_3_obj:
+            st.error("未识别齐全部 3 张关键表格！请在上方上传区拖入或选择包含【1. 待结算词条列表】、【2. 专家银行卡信息表】及【3. 语料库全量明细表】的文件。")
+        else:
+            with st.status(f"正在沙盒环境中执行【{MODULE_BEIJIAN}】核心结算逻辑...", expanded=True) as status:
+                st.write("1. 正在初始化沙盒与暂存上传文件...")
+                temp_dir = tempfile.mkdtemp()
+                try:
+                    f1_path = os.path.join(temp_dir, file_1_obj.name)
+                    with open(f1_path, "wb") as f:
+                        f.write(file_1_obj.getvalue())
+
+                    f2_path = os.path.join(temp_dir, file_2_obj.name)
+                    with open(f2_path, "wb") as f:
+                        f.write(file_2_obj.getvalue())
+
+                    f3_path = os.path.join(temp_dir, file_3_obj.name)
+                    with open(f3_path, "wb") as f:
+                        f.write(file_3_obj.getvalue())
+
+                    st.write("2. 调度北检&康恩贝三表智能核算引擎...")
+                    import importlib
+                    beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement")
+
+                    logs_list = []
+                    def log_collector(msg):
+                        clean_msg = str(msg).strip()
+                        logs_list.append(clean_msg)
+                        st.write(clean_msg)
+
+                    res = beijian_engine.process_beijian_kangbei(
+                        file_1=f1_path,
+                        file_2=f2_path,
+                        file_3=f3_path,
+                        output_dir=temp_dir,
+                        include_all_133=True,
+                        log_func=log_collector
+                    )
+
+                    if res.get("success"):
+                        status.update(label=f"【{MODULE_BEIJIAN}】处理完成！", state="complete")
+                        st.success("对账与结算明细表单生成完毕！")
+
+                        # KPI 指标展示
+                        st.markdown("##### 结算核对核心指标看板")
+                        k1, k2, k3, k4 = st.columns(4)
+                        with k1:
+                            st.metric("本次结算词条数", f"{res['total_items']} 篇")
+                        with k2:
+                            st.metric("本次结算专家数", f"{res['total_doctors']} 位")
+                        with k3:
+                            st.metric("实发劳务总金额", f"¥ {res['total_net']:,.2f}")
+                        with k4:
+                            st.metric("应发税前总额", f"¥ {res['total_gross']:,.2f}", delta=f"-¥ {res['total_tax']:,.2f} 税金")
+
+                        # 读取生成文件
+                        files_map = res.get("files", {})
+                        f7_path = files_map.get("7_专家劳务报酬明细表.xlsx")
+                        f8_path = files_map.get("8_已结算语料词条明细表.xlsx")
+                        f9_path = files_map.get("9_作品劳务结算总表.xlsx")
+
+                        f7_bytes = open(f7_path, "rb").read() if f7_path and os.path.exists(f7_path) else None
+                        f8_bytes = open(f8_path, "rb").read() if f8_path and os.path.exists(f8_path) else None
+                        f9_bytes = open(f9_path, "rb").read() if f9_path and os.path.exists(f9_path) else None
+
+                        # 打包 ZIP
+                        all_outputs = {}
+                        if f7_bytes:
+                            all_outputs["7_专家劳务报酬明细表.xlsx"] = f7_bytes
+                        if f8_bytes:
+                            all_outputs["8_已结算语料词条明细表.xlsx"] = f8_bytes
+                        if f9_bytes:
+                            all_outputs["9_作品劳务结算总表.xlsx"] = f9_bytes
+
+                        zip_bytes = create_zip_archive(all_outputs)
+
+                        # 下载按钮组
+                        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+                        _, col_dl_zip, _ = st.columns([1, 1.8, 1])
+                        with col_dl_zip:
+                            st.download_button(
+                                label=f"📦 一键打包下载全部结算表单 (ZIP) ({format_size(len(zip_bytes))})",
+                                data=zip_bytes,
+                                file_name=f"北检康恩贝结算全套表单_{res['total_items']}条_{res['total_doctors']}人.zip",
+                                mime="application/zip",
+                                use_container_width=True,
+                                type="primary"
+                            )
+
+                        cd1, cd2, cd3 = st.columns(3)
+                        with cd1:
+                            if f7_bytes:
+                                st.download_button(
+                                    label=f"📄 下载【7. 专家劳务报酬明细表】 ({format_size(len(f7_bytes))})",
+                                    data=f7_bytes,
+                                    file_name="7_专家劳务报酬明细表.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                        with cd2:
+                            if f8_bytes:
+                                st.download_button(
+                                    label=f"📄 下载【8. 语料词条明细表】 ({format_size(len(f8_bytes))})",
+                                    data=f8_bytes,
+                                    file_name="8_已结算语料词条明细表.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                        with cd3:
+                            if f9_bytes:
+                                st.download_button(
+                                    label=f"📄 下载【9. 项目作品结算表】 ({format_size(len(f9_bytes))})",
+                                    data=f9_bytes,
+                                    file_name="9_作品劳务结算总表.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+
+                        # 数据预览 Tabs
+                        st.markdown("##### 生成结果数据在线预览")
+                        tab7, tab8, tab9 = st.tabs(["7. 专家劳务报酬明细表", "8. 语料词条明细表", "9. 项目作品结算表"])
+                        with tab7:
+                            if f7_bytes:
+                                try:
+                                    df7_prev = pd.read_excel(io.BytesIO(f7_bytes), skiprows=3)
+                                    st.dataframe(df7_prev.head(100), use_container_width=True)
+                                except Exception as e:
+                                    st.caption(f"预览加载失败: {e}")
+                        with tab8:
+                            if f8_bytes:
+                                try:
+                                    df8_prev = pd.read_excel(io.BytesIO(f8_bytes))
+                                    st.dataframe(df8_prev.head(100), use_container_width=True)
+                                except Exception as e:
+                                    st.caption(f"预览加载失败: {e}")
+                        with tab9:
+                            if f9_bytes:
+                                try:
+                                    df9_prev = pd.read_excel(io.BytesIO(f9_bytes), skiprows=3)
+                                    st.dataframe(df9_prev.head(100), use_container_width=True)
+                                except Exception as e:
+                                    st.caption(f"预览加载失败: {e}")
+
+                    else:
+                        status.update(label="处理失败", state="error")
+                        st.error("执行过程出现错误，请检查输入表格格式。")
+
+                except Exception as e:
+                    status.update(label="处理异常", state="error")
+                    st.error(f"处理数据时发生异常: {str(e)}")
+                finally:
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception:
+                        pass
+
 
 
 
