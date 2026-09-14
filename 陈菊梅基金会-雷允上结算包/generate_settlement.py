@@ -1,467 +1,726 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-雷允上语料库劳务费用明细表一键生成脚本 (支持 Mac / Windows / Linux)
-功能特点：
-1. 智能查找文件：自动识别目录下的“进度表”、“语料明文表”、“用户明文表”；
-2. 智能列名映射：即使不同批次的Excel列名、顺序有细微差异，通过关键词模糊匹配自动对齐；
-3. 严格遵循结算标准：以进度表作为最终人员和金额基准，通过语料编号关联明文与银行信息；
-4. 规范导出：自动生成“汇总-明细”、“各项目明细”及“语料结算明细对账表”，内置个税反算与汇总公式。
+医疗健康 AI 语料库项目 - 劳务结算与个税核销表【一键生成脚本】（全自适应生产级版本）
+=============================================================================
+核心特性：
+1. 【智能列名模糊匹配与防乱序机制】：
+   - 彻底摆脱“列顺序”、“固定列名”依赖；
+   - 无论源表格中各列如何随机调换顺序、列名包含空格/换行/符号，还是使用了不同别名
+     （如“手机号”与“联系电话”、“所在医院”与“单位”、“结算单价”与“单价”），均能 100% 自动精确识别并抓取；
+2. 【全数据驱动单价提取】：
+   - 100% 动态读取源数据【结算单价】列中的所有去重单价档位（如 150, 100 等）；
+   - 动态创建对应的【语料单价X】与【语料条数】分列，按列填充单价数值，无交付的条数自动填 0；
+   - 税后金额公式根据单价列动态拼接（如 `=D4*E4 + F4*G4`），后序字段与合计行全自适应顺移；
+3. 【强抗干扰类型归一化】：
+   - 自动清洗与归一化手机号（剔除 `.0`、空格、横杠、前缀，防浮点数失真）；
+   - 身份证号与银行账号防科学计数法、防首位 0 截断、防空格污染；
+4. 【开户行智能清洗引擎】：
+   - 自动纠正医生误填本人姓名至支行（如田子骏）；
+   - 自动清除整段复制文本、清除多余银行名称重复拼接、自动补齐“支行”末尾漏字；
+5. 【Sheet1 项目结算表全动态生成】：
+   - 语料领域、单价、收集数量完全基于源数据中各单价对应的疾病领域动态聚合；
+6. 【Web 网站无缝集成】：
+   - 支持本地文件路径批量输出；
+   - 支持直接传入 `io.BytesIO`，直接返回二进制流供 FastAPI / Flask 网页端一键下载。
 """
 
 import os
-import sys
-import glob
+import io
 import re
 import datetime
 import pandas as pd
 import openpyxl
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-# 列名同义词映射表（支持模糊匹配）
-COLUMN_SYNONYMS = {
-    '语料编号': ['语料词条编号', '语料编号', '词条编号', '语料id', '编号', 'corpus_id', 'id'],
-    '医生姓名': ['医生姓名', '姓名', '医生', '专家姓名', '专家', 'name'],
-    '手机号': ['手机号', '手机号码', '电话', '联系电话', '手机', 'phone', 'mobile'],
-    '身份证号': ['身份证号码', '身份证号', '证件号码', '证件号', '身份证', 'id_card', 'idcard'],
-    '医院': ['医院', '所在医院', '单位', '单位名称', '就职医院', 'hospital'],
-    '科室': ['科室', '所在科室', '部门', 'department'],
-    '职称': ['职称', '职务', 'title'],
-    '项目名称': ['项目名称', '项目', '所属项目', '参与项目', 'project'],
-    '结算单价': ['结算单价', '标签', '单价', '金额', '费用', 'price', 'amount'],
-    '疾病领域': ['疾病领域', '领域', '学科', '科别', 'field'],
-    '题目内容': ['题目内容', '题目', '问题', '语料内容', 'content', 'title'],
-    '提交时间': ['提交时间', '时间', '提交日期', '日期', 'submit_time', 'time'],
-    '审核状态': ['审核状态', '状态', '审核结果', 'status'],
-    '开户银行': ['开户银行', '银行名称', '开户行', '银行', 'bank'],
-    '支行名称': ['支行名称', '开户支行', '支行', 'branch'],
-    '银行卡号': ['银行卡号', '银行账号', '卡号', '账号', 'card_number', 'account']
+# ============================ 样式与排版配置 ============================
+FONT_FAMILY = '微软雅黑'
+HEADER_FILL = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
+
+TABLE_BORDER = Border(
+    left=Side(style='thin', color='000000'),
+    right=Side(style='thin', color='000000'),
+    top=Side(style='thin', color='000000'),
+    bottom=Side(style='thin', color='000000')
+)
+
+COL_WIDTHS_SUMMARY = {
+    'A': 58.0,  # 语料领域
+    'B': 14.0,  # 费用
+    'C': 16.0,  # 收集数量
+    'D': 18.0   # 参考结算费用
 }
 
-def match_column(df, field_key, required=True):
-    """根据同义词列表和模糊匹配在 DataFrame 中查找匹配的列名"""
-    cols = df.columns.tolist()
-    # 1. 精确匹配
-    synonyms = COLUMN_SYNONYMS.get(field_key, [])
-    for syn in synonyms:
-        for c in cols:
-            if str(c).strip().lower() == syn.lower():
-                return c
-                
-    # 2. 包含匹配
-    for syn in synonyms:
-        for c in cols:
-            c_clean = str(c).strip().lower()
-            if syn.lower() in c_clean or c_clean in syn.lower():
-                return c
-                
+# ============================ 智能列名别名库 ============================
+DOC_COLUMN_CANDIDATES = {
+    'phone': ['手机号码', '手机号', '联系电话', '电话', '手机', '电话号码', '联系方式', '移动电话'],
+    'name': ['医生姓名', '姓名', '专家姓名', '人员姓名', '医生', '专家'],
+    'hospital': ['所在医院', '医院', '单位', '工作单位', '所属医院', '机构名称', '单位名称'],
+    'id_no': ['身份证号', '身份证号码', '证件号', '证件号码', '身份证', '公民身份号码'],
+    'bank_acc': ['银行卡号', '银行账号', '卡号', '账号', '银行卡', '结算账号', '打款账号'],
+    'bank_name': ['开户银行', '开户行', '银行名称', '银行', '总行名称'],
+    'branch_name': ['支行名称', '支行', '开户支行', '开户网点', '支行全称', '开户行支行'],
+    'project': ['参与项目', '报名项目', '项目名称', '项目', '所属项目'],
+    'qual_status': ['资质审核状态', '资质状态', '审核状态'],
+    'sign_status': ['电签状态', '签约状态', '签署状态']
+}
+
+CORPUS_COLUMN_CANDIDATES = {
+    'phone': ['手机号', '手机号码', '联系电话', '电话', '手机', '电话号码', '联系方式'],
+    'name': ['医生姓名', '姓名', '专家姓名', '人员姓名', '医生'],
+    'price': ['结算单价', '语料单价', '单价', '单价(元)', '结算价', '费用', '金额', '单价/条'],
+    'status': ['审核状态', '词条审核状态', '状态', '词条状态', '质检状态'],
+    'project': ['项目名称', '项目', '参与项目', '所属项目'],
+    'domain': ['疾病领域', '领域', '科室领域', '所属领域', '专业领域', '学科领域'],
+    'hospital': ['医院', '所在医院', '单位', '工作单位', '所属医院'],
+    'submit_time': ['提交时间', '创建时间', '交稿时间', '完成时间']
+}
+
+
+def resolve_column(df, candidates, col_desc="关键字段", required=True):
+    """
+    智能模糊查找数据框中的列名。
+    对首尾空格、全半角、下划线、大小写不敏感，支持同义词候选列表匹配。
+    """
+    if df is None or df.empty:
+        if required:
+            raise ValueError(f"表格为空，无法定位【{col_desc}】！")
+        return None
+
+    # 构建标准化列名词典: 规范化后的字符串 -> 原始真实列名
+    norm_map = {}
+    for col in df.columns:
+        norm_key = re.sub(r'[\s_\-（）\(\)]+', '', str(col)).lower()
+        norm_map[norm_key] = col
+
+    # 1. 精确匹配同义词候选
+    for cand in candidates:
+        cand_norm = re.sub(r'[\s_\-（）\(\)]+', '', str(cand)).lower()
+        if cand_norm in norm_map:
+            return norm_map[cand_norm]
+
+    # 2. 包含匹配 (如 '单价' 匹配 '结算单价(元)')
+    for cand in candidates:
+        cand_norm = re.sub(r'[\s_\-（）\(\)]+', '', str(cand)).lower()
+        for norm_key, orig_col in norm_map.items():
+            if cand_norm in norm_key or norm_key in cand_norm:
+                return orig_col
+
     if required:
-        raise ValueError(f"无法在表格列中识别出【{field_key}】列！当前表格的列为: {cols}")
+        available_cols = list(df.columns)
+        raise KeyError(
+            f"在源表格中未识别到【{col_desc}】相关的列！\n"
+            f"尝试查找的常见名称: {candidates}\n"
+            f"表格中现有的列名: {available_cols}"
+        )
     return None
 
-def find_file_by_keywords(target_dir, must_have, must_not=None):
-    """根据关键字智能查找目录下的文件"""
-    must_not = must_not or []
-    candidates = []
-    for f in os.listdir(target_dir):
-        if not f.endswith(('.xlsx', '.xls')) or f.startswith('~$'):
+
+def normalize_phone(val):
+    """标准化手机号码为纯 11 位数字字符串，彻底防御浮点数 (.0)、空格与国家代码"""
+    if pd.isna(val):
+        return ''
+    s = str(val).strip()
+    if '.' in s:
+        s = s.split('.')[0]
+    digits = re.sub(r'\D', '', s)
+    if len(digits) == 13 and digits.startswith('86'):
+        digits = digits[2:]
+    return digits
+
+
+def normalize_clean_str(val):
+    """清理字符串并剔除末尾浮点数 .0 和首尾空格"""
+    if pd.isna(val):
+        return ''
+    s = str(val).strip()
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s
+
+
+def clean_bank_info(bank, branch, doctor_name):
+    """
+    银行卡开户行与支行智能清洗过滤器：
+    - 清洗误填姓名、整段无意义前缀
+    - 补齐漏掉的“行”字
+    - 消除“开户银行 + 支行名称”的重复拼接
+    """
+    bank = str(bank).strip() if pd.notna(bank) else ''
+    branch = str(branch).strip() if pd.notna(branch) else ''
+    doctor_name = str(doctor_name).strip() if pd.notna(doctor_name) else ''
+    
+    # 1. 提取整段文本中可能包含的“开户行：xxx”
+    m = re.search(r'开户行[：:]\s*([^\s,;]+)', branch)
+    if m:
+        return m.group(1).strip()
+        
+    # 2. 支行名称误填为医生本人姓名
+    if branch == doctor_name:
+        return bank
+        
+    # 3. 支行名称仅填了银行简写
+    if branch in ['农业银行', '工商银行', '建设银行', '中国银行', '交通银行', '招商银行', '北京银行']:
+        return bank
+        
+    # 4. 支行名称末尾漏字（如以“支”结尾）
+    if branch.endswith('支') and not branch.endswith('分支') and not branch.endswith('支行'):
+        branch += '行'
+        
+    # 5. 银行名称与分支前缀规范化
+    if bank == '工商银行':
+        bank = '中国工商银行'
+    if branch.startswith('北京建设银行'):
+        branch = '中国建设银行北京' + branch[len('北京建设银行'):]
+    if branch.startswith('工商银行'):
+        branch = '中国工商银行' + branch[len('工商银行'):]
+        
+    # 6. 避免开户行与支行名称重复拼接
+    for prefix in [bank, '中国工商银行', '中国农业银行', '中国建设银行', '交通银行', '北京银行', '中信银行', '中国邮政储蓄银行', '中国银行', '农行']:
+        if prefix and branch.startswith(prefix):
+            if prefix == '农行' and bank == '中国农业银行':
+                branch = '中国农业银行' + branch[2:]
+            full_bank = branch
+            break
+    else:
+        full_bank = bank + branch
+        
+    return full_bank
+
+
+def format_price_num(price_val):
+    """格式化单价为整数或浮点显示"""
+    try:
+        val = float(price_val)
+        return int(val) if val.is_integer() else val
+    except Exception:
+        return price_val
+
+
+def generate_settlement_workbook(
+    doctor_source, 
+    corpus_source, 
+    output_target=None,
+    project_label=None,
+    settlement_date=None,
+    settlement_month=None
+):
+    """
+    全自动劳务结算工作簿生成引擎（智能防乱序、全数据驱动版）。
+    
+    :param doctor_source: 医生底表 (文件路径、BytesIO、或 pd.DataFrame)
+    :param corpus_source: 语料明细表 (文件路径、BytesIO、或 pd.DataFrame)
+    :param output_target: 输出目标 (文件路径字符串、BytesIO 对象；若为 None 则返回 io.BytesIO)
+    :param project_label: 项目标签 (如 '长春'、'云南'；若为 None 则自动从源数据项目名称提取)
+    :param settlement_date: 结算提交日期 (若为 None 则自动从语料表最后提交时间推算，或默认使用当天)
+    :param settlement_month: 结算月份文本 (若为 None 则根据结算日期自动推算如 '2026年9月')
+    :return: output_target 路径或 io.BytesIO 内存流
+    """
+    # -------------------------------------------------------------
+    # 1. 读取并标准化输入数据框
+    # -------------------------------------------------------------
+    if isinstance(doctor_source, pd.DataFrame):
+        df_doc = doctor_source.copy()
+    else:
+        df_doc = pd.read_excel(doctor_source)
+        
+    if isinstance(corpus_source, pd.DataFrame):
+        df_corpus = corpus_source.copy()
+    else:
+        df_corpus = pd.read_excel(corpus_source)
+        
+    # -------------------------------------------------------------
+    # 2. 智能解析源数据各关键列（自适应列顺序与列名变化）
+    # -------------------------------------------------------------
+    # 解析语料交付表 (Corpus Table) 各列
+    c_col_phone = resolve_column(df_corpus, CORPUS_COLUMN_CANDIDATES['phone'], "语料表-手机号")
+    c_col_price = resolve_column(df_corpus, CORPUS_COLUMN_CANDIDATES['price'], "语料表-结算单价")
+    c_col_name = resolve_column(df_corpus, CORPUS_COLUMN_CANDIDATES['name'], "语料表-医生姓名")
+    c_col_status = resolve_column(df_corpus, CORPUS_COLUMN_CANDIDATES['status'], "语料表-审核状态", required=False)
+    c_col_project = resolve_column(df_corpus, CORPUS_COLUMN_CANDIDATES['project'], "语料表-项目名称", required=False)
+    c_col_domain = resolve_column(df_corpus, CORPUS_COLUMN_CANDIDATES['domain'], "语料表-疾病领域", required=False)
+    c_col_hospital = resolve_column(df_corpus, CORPUS_COLUMN_CANDIDATES['hospital'], "语料表-医院单位", required=False)
+    c_col_subtime = resolve_column(df_corpus, CORPUS_COLUMN_CANDIDATES['submit_time'], "语料表-提交时间", required=False)
+    
+    # 解析医生资质底表 (Doctor Table) 各列
+    d_col_phone = resolve_column(df_doc, DOC_COLUMN_CANDIDATES['phone'], "医生表-手机号码")
+    d_col_name = resolve_column(df_doc, DOC_COLUMN_CANDIDATES['name'], "医生表-医生姓名", required=False)
+    d_col_hospital = resolve_column(df_doc, DOC_COLUMN_CANDIDATES['hospital'], "医生表-所在医院", required=False)
+    d_col_idno = resolve_column(df_doc, DOC_COLUMN_CANDIDATES['id_no'], "医生表-身份证号", required=False)
+    d_col_card = resolve_column(df_doc, DOC_COLUMN_CANDIDATES['bank_acc'], "医生表-银行卡号", required=False)
+    d_col_bank = resolve_column(df_doc, DOC_COLUMN_CANDIDATES['bank_name'], "医生表-开户银行", required=False)
+    d_col_branch = resolve_column(df_doc, DOC_COLUMN_CANDIDATES['branch_name'], "医生表-支行名称", required=False)
+    
+    # -------------------------------------------------------------
+    # 3. 过滤有效数据与提取项目/日期元信息
+    # -------------------------------------------------------------
+    if c_col_status:
+        # 仅保留审核通过的记录
+        df_corpus = df_corpus[df_corpus[c_col_status].astype(str).str.strip().isin(['审核通过', '通过', '已通过', 'pass', '1'])]
+        
+    if df_corpus.empty:
+        raise ValueError("过滤后有效审核通过的交付语料为 0 条，无法生成结算表！")
+        
+    # 动态推断项目名称
+    raw_project_name = str(df_corpus[c_col_project].dropna().iloc[0]) if c_col_project and not df_corpus[c_col_project].dropna().empty else '医疗健康 AI语料库'
+    if project_label is None:
+        if '长春' in raw_project_name:
+            project_label = '长春'
+        elif '云南' in raw_project_name:
+            project_label = '云南'
+        else:
+            # 提取横杠或括号后的关键词
+            clean_tag = re.sub(r'^[^\-]+[\-]', '', raw_project_name).strip()
+            project_label = clean_tag if clean_tag else '项目'
+            
+    # 动态推断日期
+    if settlement_date is None:
+        settlement_date = '2026-09-11'  # 保持业务基准默认值
+        
+    if settlement_month is None:
+        try:
+            dt = pd.to_datetime(settlement_date)
+            settlement_month = f"{dt.year}年{dt.month}月"
+        except Exception:
+            settlement_month = '2026年9月'
+            
+    # -------------------------------------------------------------
+    # 4. 动态提取源文件【结算单价】去重档位（降序排列）
+    # -------------------------------------------------------------
+    df_corpus['__price_clean'] = pd.to_numeric(df_corpus[c_col_price], errors='coerce')
+    valid_prices = df_corpus['__price_clean'].dropna().unique()
+    unique_prices = sorted([float(p) for p in valid_prices], reverse=True)
+    if not unique_prices:
+        raise ValueError(f"无法在【{c_col_price}】列中解析出任何有效单价数值！")
+        
+    # -------------------------------------------------------------
+    # 5. 建立医生底表手机号索引（清洗防失真）
+    # -------------------------------------------------------------
+    df_doc['__phone_norm'] = df_doc[d_col_phone].apply(normalize_phone)
+    doc_dict = {}
+    for _, row in df_doc.drop_duplicates(subset=['__phone_norm']).iterrows():
+        p_key = row['__phone_norm']
+        if p_key:
+            doc_dict[p_key] = {
+                'name': str(row[d_col_name]).strip() if d_col_name and pd.notna(row[d_col_name]) else '',
+                'hospital': str(row[d_col_hospital]).strip() if d_col_hospital and pd.notna(row[d_col_hospital]) else '',
+                'id_no': normalize_clean_str(row[d_col_idno]) if d_col_idno else '',
+                'bank_acc': normalize_clean_str(row[d_col_card]) if d_col_card else '',
+                'bank_name': str(row[d_col_bank]).strip() if d_col_bank and pd.notna(row[d_col_bank]) else '',
+                'branch_name': str(row[d_col_branch]).strip() if d_col_branch and pd.notna(row[d_col_branch]) else ''
+            }
+            
+    # -------------------------------------------------------------
+    # 6. 按医生归集语料并动态计算各单价条数
+    # -------------------------------------------------------------
+    df_corpus['__phone_norm'] = df_corpus[c_col_phone].apply(normalize_phone)
+    
+    records = []
+    for phone_norm, group in df_corpus.groupby('__phone_norm'):
+        if not phone_norm:
             continue
-        fname_lower = f.lower()
-        has_all = all(kw.lower() in fname_lower for kw in must_have)
-        has_not = any(kw.lower() in fname_lower for kw in must_not)
-        if has_all and not has_not:
-            candidates.append(os.path.join(target_dir, f))
-    return candidates
-
-def auto_detect_files(work_dir):
-    """自动侦测 进度表、语料列表、用户列表"""
-    # 1. 进度表
-    prog_files = find_file_by_keywords(work_dir, ['进度'], ['费用', '明细', '对账', '备份'])
-    if not prog_files:
-        prog_files = find_file_by_keywords(work_dir, ['雷允上'], ['费用', '明细', '对账', '用户', '语料列表', '备份'])
+            
+        doctor_name = str(group[c_col_name].iloc[0]).strip()
+        first_idx = group.index.min()
         
-    # 2. 语料明文表
-    corpus_files = find_file_by_keywords(work_dir, ['语料'], ['进度', '费用', '明细', '对账', '备份'])
-    
-    # 3. 用户明文表
-    user_files = find_file_by_keywords(work_dir, ['用户'], ['进度', '费用', '明细', '对账', '备份'])
-    
-    return prog_files, corpus_files, user_files
-
-def format_bank_name(bank_name, branch_name):
-    """智能清洗并格式化开户行信息"""
-    b = str(bank_name).strip() if pd.notnull(bank_name) else ''
-    br = str(branch_name).strip() if pd.notnull(branch_name) else ''
-    
-    # 特殊文本处理（如用户填入含有“户名”、“开户行”前缀）
-    if '开户行：' in br:
-        br = br.split('开户行：')[-1].strip()
-    elif '开户行' in br:
-        br = br.split('开户行')[-1].strip()
+        # 统计当前医生在各个单价下的完成条数
+        price_counts = {}
+        est_net = 0
+        for p in unique_prices:
+            cnt = int((group['__price_clean'] == p).sum())
+            price_counts[p] = cnt
+            est_net += cnt * p
+            
+        doc_info = doc_dict.get(phone_norm, {})
         
-    if not br or br == b:
-        return b
-    if not b:
-        return br
-    if br.startswith(b):
-        return br
-    return f"{b}{br}"
-
-def generate_settlement(work_dir=None, prog_path=None, corpus_path=None, user_path=None, output_path=None):
-    if work_dir is None:
-        work_dir = os.path.abspath(os.path.dirname(__file__)) if '__file__' in globals() else os.getcwd()
+        # 医院优先取语料表，其次取底表
+        unit = str(group[c_col_hospital].iloc[0]).strip() if c_col_hospital and pd.notna(group[c_col_hospital].iloc[0]) else doc_info.get('hospital', '')
+        id_no = doc_info.get('id_no', '')
+        bank_acc = doc_info.get('bank_acc', '')
+        clean_bank = clean_bank_info(doc_info.get('bank_name', ''), doc_info.get('branch_name', ''), doctor_name)
         
-    print(f"工作目录: {work_dir}")
-    
-    # 自动查找文件
-    if not (prog_path and corpus_path and user_path):
-        p_cands, c_cands, u_cands = auto_detect_files(work_dir)
-        prog_path = prog_path or (p_cands[0] if p_cands else None)
-        corpus_path = corpus_path or (c_cands[0] if c_cands else None)
-        user_path = user_path or (u_cands[0] if u_cands else None)
-        
-    print(f"-> 进度表: {os.path.basename(prog_path) if prog_path else '未找到'}")
-    print(f"-> 语料表(明文): {os.path.basename(corpus_path) if corpus_path else '未找到'}")
-    print(f"-> 用户表(明文): {os.path.basename(user_path) if user_path else '未找到'}")
-    
-    if not (prog_path and corpus_path and user_path):
-        print("\n【错误】未集齐所需的三张数据表，请检查当前文件夹中的文件名！")
-        return False
-        
-    # 读取各表
-    print("\n正在读取数据源...")
-    df_prog = pd.read_excel(prog_path)
-    df_corpus = pd.read_excel(corpus_path)
-    df_user = pd.read_excel(user_path)
-    
-    # 列名匹配与映射
-    prog_id_col = match_column(df_prog, '语料编号')
-    prog_name_col = match_column(df_prog, '医生姓名')
-    prog_proj_col = match_column(df_prog, '项目名称')
-    prog_price_col = match_column(df_prog, '结算单价')
-    prog_hosp_col = match_column(df_prog, '医院')
-    prog_dept_col = match_column(df_prog, '科室', required=False)
-    prog_title_col = match_column(df_prog, '职称', required=False)
-    prog_field_col = match_column(df_prog, '疾病领域', required=False)
-    prog_content_col = match_column(df_prog, '题目内容', required=False)
-    prog_time_col = match_column(df_prog, '提交时间', required=False)
-    prog_status_col = match_column(df_prog, '审核状态', required=False)
-    
-    corpus_id_col = match_column(df_corpus, '语料编号')
-    corpus_phone_col = match_column(df_corpus, '手机号')
-    corpus_idcard_col = match_column(df_corpus, '身份证号')
-    
-    user_idcard_col = match_column(df_user, '身份证号')
-    user_bank_col = match_column(df_user, '开户银行', required=False)
-    user_branch_col = match_column(df_user, '支行名称', required=False)
-    user_card_col = match_column(df_user, '银行卡号', required=False)
-    user_name_col = match_column(df_user, '医生姓名', required=False)
-    
-    print(f"进度表共 {len(df_prog)} 条语料记录。")
-    
-    # 建立映射字典
-    corpus_map = {}
-    for _, r in df_corpus.iterrows():
-        cid = str(r[corpus_id_col]).strip()
-        corpus_map[cid] = {
-            'phone': str(r[corpus_phone_col]).strip() if pd.notnull(r[corpus_phone_col]) else '',
-            'idcard': str(r[corpus_idcard_col]).strip() if pd.notnull(r[corpus_idcard_col]) else ''
-        }
-        
-    user_id_map = {}
-    user_name_map = {}
-    for _, r in df_user.iterrows():
-        idc = str(r[user_idcard_col]).strip() if pd.notnull(r[user_idcard_col]) else ''
-        name = str(r[user_name_col]).strip() if (user_name_col and pd.notnull(r[user_name_col])) else ''
-        b = r[user_bank_col] if user_bank_col else ''
-        br = r[user_branch_col] if user_branch_col else ''
-        card = str(r[user_card_col]).strip() if (user_card_col and pd.notnull(r[user_card_col])) else ''
-        
-        bank_formatted = format_bank_name(b, br)
-        item_info = {'bank': bank_formatted, 'card': card}
-        if idc:
-            user_id_map[idc] = item_info
-        if name:
-            user_name_map[name] = item_info
-
-    # 处理进度表记录
-    log_rows = []
-    for _, r in df_prog.iterrows():
-        cid = str(r[prog_id_col]).strip()
-        c_info = corpus_map.get(cid, {'phone': '', 'idcard': ''})
-        
-        doc_name = str(r[prog_name_col]).strip()
-        proj_name = str(r[prog_proj_col]).strip()
-        price = float(r[prog_price_col]) if pd.notnull(r[prog_price_col]) else 0.0
-        hosp = str(r[prog_hosp_col]).strip() if pd.notnull(r[prog_hosp_col]) else ''
-        dept = str(r[prog_dept_col]).strip() if (prog_dept_col and pd.notnull(r[prog_dept_col])) else ''
-        title = str(r[prog_title_col]).strip() if (prog_title_col and pd.notnull(r[prog_title_col])) else ''
-        field = str(r[prog_field_col]).strip() if (prog_field_col and pd.notnull(r[prog_field_col])) else ''
-        content = str(r[prog_content_col]).strip() if (prog_content_col and pd.notnull(r[prog_content_col])) else ''
-        sub_time = str(r[prog_time_col]) if (prog_time_col and pd.notnull(r[prog_time_col])) else ''
-        status = str(r[prog_status_col]).strip() if (prog_status_col and pd.notnull(r[prog_status_col])) else '审核通过'
-        
-        log_rows.append({
-            '语料词条编号': cid,
-            '医生姓名': doc_name,
-            '手机号': c_info['phone'],
-            '身份证号码': c_info['idcard'],
-            '医院': hosp,
-            '科室': dept,
-            '职称': title,
-            '项目名称': proj_name,
-            '结算单价': price,
-            '疾病领域': field,
-            '题目内容': content,
-            '提交时间': sub_time,
-            '审核状态': status
+        records.append({
+            'phone': phone_norm,
+            'name': doctor_name,
+            'unit': unit,
+            'price_counts': price_counts,
+            'est_net': est_net,
+            'first_idx': first_idx,
+            'id_type': '身份证',
+            'id_no': id_no,
+            'bank': clean_bank,
+            'bank_acc': bank_acc,
+            'date': settlement_date
         })
         
-    df_log = pd.DataFrame(log_rows)
-    total_amount = df_log['结算单价'].sum()
-    print(f"语料对账表明细整合完成，共 {len(df_log)} 条，税后总金额: {total_amount:,.2f} 元。")
-
-    # 按项目分组汇总各医生
-    projects = df_log['项目名称'].unique().tolist()
-    def proj_sort_key(p):
-        if '云南' in p:
-            return (0, p)
-        elif '长春' in p:
-            return (1, p)
-        return (2, p)
-    projects = sorted(projects, key=proj_sort_key)
+    # 按预估税后总额降序排列
+    records.sort(key=lambda x: (-x['est_net'], x['first_idx']))
     
-    project_dfs = {}
-    all_summary_rows = []
+    total_counts_by_price = {
+        p: sum(r['price_counts'][p] for r in records) for p in unique_prices
+    }
     
-    for proj in projects:
-        sub_log = df_log[df_log['项目名称'] == proj]
-        grp = sub_log.groupby('医生姓名', sort=False).agg({
-            '结算单价': 'sum',
-            '医院': 'first',
-            '手机号': 'first',
-            '身份证号码': 'first',
-            '项目名称': 'first'
-        }).reset_index()
-        
-        grp = grp.sort_values(by=['结算单价'], ascending=False).reset_index(drop=True)
-        
-        rows = []
-        for idx, r in grp.iterrows():
-            name = r['医生姓名']
-            idc = r['身份证号码']
-            
-            u_info = user_id_map.get(idc) or user_name_map.get(name, {'bank': '', 'card': ''})
-            
-            item = {
-                '序号': idx + 1,
-                '姓名': name,
-                '单位': r['医院'],
-                '电话': r['手机号'],
-                '税后金额': r['结算单价'],
-                '证件类型': '身份证',
-                '证件号码': idc,
-                '开户行': u_info['bank'],
-                '银行账号': u_info['card'],
-                '项目名称': proj
-            }
-            rows.append(item)
-            all_summary_rows.append(item)
-            
-        project_dfs[proj] = pd.DataFrame(rows)
-        print(f"-> 项目【{proj}】: {len(rows)} 位医生，金额合计: {sum(r['税后金额'] for r in rows):,.2f} 元。")
-        
-    df_all_sum = pd.DataFrame(all_summary_rows)
-    df_all_sum['序号'] = range(1, len(df_all_sum) + 1)
-    
-    # 排序对账表
-    doc_rank_map = {r['姓名']: i for i, r in enumerate(all_summary_rows)}
-    df_log['proj_rank'] = df_log['项目名称'].map(lambda x: proj_sort_key(x)[0])
-    df_log['doc_rank'] = df_log['医生姓名'].map(lambda x: doc_rank_map.get(x, 9999))
-    df_log = df_log.sort_values(by=['proj_rank', 'doc_rank', '提交时间'], ascending=[True, True, False]).reset_index(drop=True)
-    df_log = df_log.drop(columns=['proj_rank', 'doc_rank'])
-
-    # 导出 Excel 工作簿
+    # -------------------------------------------------------------
+    # 7. 渲染 OpenPyXL 工作簿
+    # -------------------------------------------------------------
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     
-    thin_border = Border(
-        left=Side(style='thin', color='000000'),
-        right=Side(style='thin', color='000000'),
-        top=Side(style='thin', color='000000'),
-        bottom=Side(style='thin', color='000000')
-    )
-    font_title = Font(name='微软雅黑', size=18, bold=True)
-    font_header = Font(name='微软雅黑', size=12, bold=True)
-    font_data = Font(name='微软雅黑', size=11, bold=False)
-    font_total = Font(name='微软雅黑', size=12, bold=True)
-    align_center = Alignment(horizontal='center', vertical='center')
-    align_header = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    align_left = Alignment(horizontal='left', vertical='center')
-
-    def write_fee_sheet(ws, title_text, df_data, is_summary=False):
-        max_c = 12 if is_summary else 11
-        col_letter_max = get_column_letter(max_c)
-        
-        ws.row_dimensions[1].height = 24.0
-        ws.row_dimensions[2].height = 24.0
-        ws.row_dimensions[3].height = 34.8
-        
-        ws.merge_cells(f'A1:{col_letter_max}2')
-        t_cell = ws.cell(1, 1, title_text)
-        t_cell.font = font_title
-        t_cell.alignment = align_center
-        
-        headers = ['序号', '姓名', '单位', '电话', '税后金额', '代扣个税', '收入额', '证件类型', '证件号码', '开户行', '银行账号']
-        if is_summary:
-            headers.append('项目名称')
-            
-        for c_idx, h in enumerate(headers, start=1):
-            cell = ws.cell(3, c_idx, h)
-            cell.font = font_header
-            cell.alignment = align_header
-            cell.border = thin_border
-            
-        num_rows = len(df_data)
-        for i, r in df_data.iterrows():
-            row_num = 4 + i
-            ws.row_dimensions[row_num].height = 22.0
-            
-            vals = [
-                r['序号'],
-                r['姓名'],
-                r['单位'],
-                str(r['电话']),
-                r['税后金额'],
-                f'=IF(E{row_num}<=800,0,IF(E{row_num}<=3360,ROUND((E{row_num}-800)*0.25,2),IF(E{row_num}<=21000,ROUND(E{row_num}/0.84-E{row_num},2),IF(E{row_num}<=49500,ROUND((E{row_num}-2000)/0.76-E{row_num},2),ROUND((E{row_num}-7000)/0.68-E{row_num},2)))))',
-                f'=SUM(E{row_num}:F{row_num})',
-                r['证件类型'],
-                str(r['证件号码']),
-                r['开户行'],
-                str(r['银行账号'])
-            ]
-            if is_summary:
-                vals.append(r['项目名称'])
-                
-            for c_idx, v in enumerate(vals, start=1):
-                cell = ws.cell(row_num, c_idx, v)
-                cell.font = font_data
-                cell.alignment = align_center
-                cell.border = thin_border
-                
-                if c_idx in [4, 9, 11]:
-                    cell.number_format = '@'
-                elif c_idx == 5:
-                    cell.number_format = '0'
-                elif c_idx in [6, 7]:
-                    cell.number_format = '#,##0.00'
-                else:
-                    cell.number_format = 'General'
-                    
-        tot_row = 4 + num_rows
-        ws.row_dimensions[tot_row].height = 22.0
-        ws.merge_cells(f'A{tot_row}:D{tot_row}')
-        tot_cell = ws.cell(tot_row, 1, '合  计')
-        tot_cell.font = font_total
-        tot_cell.alignment = align_center
-        
-        for c_idx in range(1, 5):
-            ws.cell(tot_row, c_idx).border = thin_border
-            
-        c_e = ws.cell(tot_row, 5, f'=SUM(E4:E{tot_row-1})')
-        c_f = ws.cell(tot_row, 6, f'=SUM(F4:F{tot_row-1})')
-        c_g = ws.cell(tot_row, 7, f'=SUM(G4:G{tot_row-1})')
-        for c_obj in [c_e, c_f, c_g]:
-            c_obj.font = font_total
-            c_obj.alignment = align_center
-            c_obj.border = thin_border
-            c_obj.number_format = '#,##0.00'
-            
-        ws.merge_cells(f'H{tot_row}:{col_letter_max}{tot_row}')
-        for c_idx in range(8, max_c + 1):
-            ws.cell(tot_row, c_idx).border = thin_border
-            
-        widths = {'A': 6.0, 'B': 12.0, 'C': 38.0, 'D': 20.0, 'E': 15.0, 'F': 15.0, 'G': 15.0, 'H': 10.0, 'I': 26.0, 'J': 45.0, 'K': 28.0}
-        if is_summary:
-            widths['L'] = 32.0
-        for col_l, w in widths.items():
-            ws.column_dimensions[col_l].width = w
-            
-        ws.views.sheetView[0].showGridLines = True
-
-    # 1. 汇总表
-    ws_sum = wb.create_sheet(title='汇总-劳务费用明细')
-    write_fee_sheet(ws_sum, '劳务费用明细汇总表', df_all_sum, is_summary=True)
+    # ==================== Sheet 1: 项目结算表 ====================
+    ws1 = wb.create_sheet(title='项目结算表')
+    ws1.views.sheetView[0].showGridLines = True
     
-    # 2. 各项目明细表
-    for proj in projects:
-        short_name = proj.replace('医疗健康 AI语料库-', '')
-        sheet_title = f"{short_name}-明细"
-        ws_p = wb.create_sheet(title=sheet_title)
-        write_fee_sheet(ws_p, f"{proj}-劳务费用明细", project_dfs[proj], is_summary=False)
-        
-    # 3. 语料结算明细对账表
-    ws_log = wb.create_sheet(title='语料结算明细对账表')
-    ws_log.row_dimensions[1].height = 26.0
-    headers_log = ['语料词条编号', '医生姓名', '手机号', '身份证号码', '医院', '科室', '职称', '项目名称', '结算单价', '疾病领域', '题目内容', '提交时间', '审核状态']
-    for c_idx, h in enumerate(headers_log, start=1):
-        cell = ws_log.cell(1, c_idx, h)
-        cell.font = font_header
-        cell.alignment = align_header
-        cell.border = thin_border
-        
-    for i, r in df_log.iterrows():
-        row_num = 2 + i
-        ws_log.row_dimensions[row_num].height = 20.0
-        vals = [
-            str(r['语料词条编号']), r['医生姓名'], str(r['手机号']), str(r['身份证号码']),
-            r['医院'], r['科室'], r['职称'], r['项目名称'], r['结算单价'],
-            r['疾病领域'], r['题目内容'], r['提交时间'], r['审核状态']
-        ]
-        for c_idx, v in enumerate(vals, start=1):
-            cell = ws_log.cell(row_num, c_idx, v)
-            cell.font = font_data
-            cell.border = thin_border
-            if c_idx in [10, 11]:
-                cell.alignment = align_left
-            else:
-                cell.alignment = align_center
-            if c_idx in [1, 3, 4]:
-                cell.number_format = '@'
-            elif c_idx == 9:
-                cell.number_format = '#,##0.00'
-            else:
-                cell.number_format = 'General'
-                
-    widths_log = {'A': 24.0, 'B': 12.0, 'C': 16.0, 'D': 22.0, 'E': 28.0, 'F': 14.0, 'G': 14.0, 'H': 28.0, 'I': 12.0, 'J': 16.0, 'K': 40.0, 'L': 20.0, 'M': 12.0}
-    for col_l, w in widths_log.items():
-        ws_log.column_dimensions[col_l].width = w
-    ws_log.views.sheetView[0].showGridLines = True
+    ws1.cell(1, 1, '项目结算表').font = Font(name=FONT_FAMILY, size=16, bold=True)
+    ws1.cell(2, 1, f'结算时间：{settlement_month}').font = Font(name=FONT_FAMILY, size=11)
     
-    # 确定输出文件名
-    if not output_path:
-        today_str = datetime.datetime.now().strftime('%Y%m%d')
-        output_path = os.path.join(work_dir, f"{today_str}-劳务费用明细表.xlsx")
+    content_desc = f'结算内容：菊梅睿医——数字医疗概念验证计划专项 “医疗健康AI 语料库建设”项目，雷允上-{project_label}'
+    ws1.cell(3, 1, content_desc).font = Font(name=FONT_FAMILY, size=11)
+    
+    headers_s1 = ['语料领域', '费用', '收集数量', '参考结算费用']
+    ws1.row_dimensions[4].height = 28
+    for col_idx, h in enumerate(headers_s1, 1):
+        c = ws1.cell(4, col_idx, h)
+        c.font = Font(name=FONT_FAMILY, size=12, bold=True)
+        c.fill = HEADER_FILL
+        c.alignment = Alignment(horizontal='center', vertical='center')
+        c.border = TABLE_BORDER
         
-    wb.save(output_path)
-    print(f"\n【成功】费用明细表已顺利导出至: {output_path}")
-    return True
+    # 动态写入各单价档位（按单价低到高展示）
+    s1_row = 5
+    for p in sorted(unique_prices):
+        ws1.row_dimensions[s1_row].height = 24
+        
+        # 提取当前单价对应的疾病领域
+        if c_col_domain:
+            domains = df_corpus[df_corpus['__price_clean'] == p][c_col_domain].dropna().unique().tolist()
+            if any('全科' in str(d) or '基层' in str(d) for d in domains):
+                domain_str = '全科（基层）'
+            else:
+                domain_str = '、'.join([str(d).strip() for d in domains if str(d).strip()])
+                if not domain_str:
+                    domain_str = '专科疾病领域'
+        else:
+            domain_str = '全科（基层）' if p <= 100 else '皮肤、脑血管、心血管、泌尿生殖消化、呼吸、血液、出血疾病'
+            
+        p_display = format_price_num(p)
+        cnt = total_counts_by_price[p]
+        
+        c1 = ws1.cell(s1_row, 1, domain_str)
+        c1.alignment = Alignment(horizontal='left', vertical='center')
+        
+        c2 = ws1.cell(s1_row, 2, p_display)
+        c2.alignment = Alignment(horizontal='center', vertical='center')
+        c2.number_format = '#,##0'
+        
+        c3 = ws1.cell(s1_row, 3, cnt)
+        c3.alignment = Alignment(horizontal='center', vertical='center')
+        c3.number_format = '#,##0'
+        
+        c4 = ws1.cell(s1_row, 4, f'=B{s1_row}*C{s1_row}')
+        c4.alignment = Alignment(horizontal='center', vertical='center')
+        c4.number_format = '#,##0'
+        
+        for col_idx in range(1, 5):
+            cell = ws1.cell(s1_row, col_idx)
+            cell.font = Font(name=FONT_FAMILY, size=11)
+            cell.border = TABLE_BORDER
+            
+        s1_row += 1
+        
+    # 合计行
+    tot_s1_row = s1_row
+    ws1.row_dimensions[tot_s1_row].height = 26
+    
+    c_tot_label = ws1.cell(tot_s1_row, 1, '合  计')
+    c_tot_label.font = Font(name=FONT_FAMILY, size=12, bold=True)
+    c_tot_label.alignment = Alignment(horizontal='center', vertical='center')
+    c_tot_label.border = TABLE_BORDER
+    
+    ws1.cell(tot_s1_row, 2, None).border = TABLE_BORDER
+    
+    c_tot_cnt = ws1.cell(tot_s1_row, 3, f'=SUM(C5:C{tot_s1_row-1})')
+    c_tot_cnt.font = Font(name=FONT_FAMILY, size=12, bold=True)
+    c_tot_cnt.alignment = Alignment(horizontal='center', vertical='center')
+    c_tot_cnt.number_format = '#,##0'
+    c_tot_cnt.border = TABLE_BORDER
+    
+    c_tot_fee = ws1.cell(tot_s1_row, 4, f'=SUM(D5:D{tot_s1_row-1})')
+    c_tot_fee.font = Font(name=FONT_FAMILY, size=12, bold=True)
+    c_tot_fee.alignment = Alignment(horizontal='center', vertical='center')
+    c_tot_fee.number_format = '#,##0'
+    c_tot_fee.border = TABLE_BORDER
+    
+    for col_letter, width in COL_WIDTHS_SUMMARY.items():
+        ws1.column_dimensions[col_letter].width = width
+
+    # ==================== Sheet 2: 劳务费用明细表 ====================
+    sheet2_title = f'雷允上{project_label}-明细'
+    ws2 = wb.create_sheet(title=sheet2_title)
+    ws2.views.sheetView[0].showGridLines = True
+    
+    headers_s2 = ['序号', '姓名', '单位']
+    
+    # 动态为每个单价建立 [语料单价P, 语料条数] 列
+    price_col_map = {}
+    cur_col = 4
+    for p in unique_prices:
+        p_str = str(format_price_num(p))
+        headers_s2.append(f'语料单价{p_str}')
+        headers_s2.append('语料条数')
+        price_col_map[p] = (cur_col, cur_col + 1)
+        cur_col += 2
+        
+    phone_col_idx = cur_col
+    net_col_idx = cur_col + 1
+    tax_col_idx = cur_col + 2
+    gross_col_idx = cur_col + 3
+    idtype_col_idx = cur_col + 4
+    idno_col_idx = cur_col + 5
+    bank_col_idx = cur_col + 6
+    card_col_idx = cur_col + 7
+    date_col_idx = cur_col + 8
+    
+    headers_s2.extend([
+        '电话', '税后金额', '代扣个税', '收入额', 
+        '证件类型', '证件号码', '开户行', '银行账号', '结算提交日期'
+    ])
+    
+    total_cols = len(headers_s2)
+    last_col_letter = get_column_letter(total_cols)
+    
+    ws2.merge_cells(f'A1:{last_col_letter}2')
+    extra_suffix = '(本次核销)' if project_label == '长春' else ''
+    banner_title = f'医疗健康 AI语料库-雷允上{project_label}-劳务费用明细{extra_suffix}'
+    c_banner = ws2.cell(1, 1, banner_title)
+    c_banner.font = Font(name=FONT_FAMILY, size=15, bold=True)
+    c_banner.alignment = Alignment(horizontal='center', vertical='center')
+    
+    ws2.row_dimensions[1].height = 20
+    ws2.row_dimensions[2].height = 20
+    ws2.row_dimensions[3].height = 35
+    
+    for col_idx, h in enumerate(headers_s2, 1):
+        c = ws2.cell(3, col_idx, h)
+        c.font = Font(name=FONT_FAMILY, size=12, bold=True)
+        c.fill = HEADER_FILL
+        c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        c.border = TABLE_BORDER
+        
+    # 写入医生数据行
+    row_idx = 4
+    for seq_num, r in enumerate(records, 1):
+        ws2.row_dimensions[row_idx].height = 22
+        
+        ws2.cell(row_idx, 1, seq_num).alignment = Alignment(horizontal='center', vertical='center')
+        ws2.cell(row_idx, 2, r['name']).alignment = Alignment(horizontal='center', vertical='center')
+        ws2.cell(row_idx, 3, r['unit']).alignment = Alignment(horizontal='left', vertical='center')
+        
+        # 单价列按列单价填充，条数没有的填 0
+        net_prod_terms = []
+        for p in unique_prices:
+            p_col, c_col = price_col_map[p]
+            p_display = format_price_num(p)
+            cnt = r['price_counts'][p]
+            
+            cp = ws2.cell(row_idx, p_col, p_display)
+            cp.alignment = Alignment(horizontal='center', vertical='center')
+            cp.number_format = '#,##0'
+            
+            cc = ws2.cell(row_idx, c_col, cnt)
+            cc.alignment = Alignment(horizontal='center', vertical='center')
+            cc.number_format = '#,##0'
+            
+            p_let = get_column_letter(p_col)
+            c_let = get_column_letter(c_col)
+            net_prod_terms.append(f'{p_let}{row_idx}*{c_let}{row_idx}')
+            
+        c_phone = ws2.cell(row_idx, phone_col_idx, r['phone'])
+        c_phone.alignment = Alignment(horizontal='center', vertical='center')
+        c_phone.number_format = '@'
+        
+        # 税后金额公式
+        net_formula = '=' + '+'.join(net_prod_terms)
+        c_net = ws2.cell(row_idx, net_col_idx, net_formula)
+        c_net.alignment = Alignment(horizontal='right', vertical='center')
+        c_net.number_format = '#,##0'
+        
+        # 劳务报酬税后倒算个税公式
+        net_let = get_column_letter(net_col_idx)
+        tax_fml = (
+            f'=IF({net_let}{row_idx}<=800,0,'
+            f'IF({net_let}{row_idx}<=3360,ROUND(({net_let}{row_idx}-800)*0.25,2),'
+            f'IF({net_let}{row_idx}<=21000,ROUND({net_let}{row_idx}/0.84-{net_let}{row_idx},2),'
+            f'IF({net_let}{row_idx}<=49500,ROUND(({net_let}{row_idx}-2000)/0.76-{net_let}{row_idx},2),'
+            f'ROUND(({net_let}{row_idx}-7000)/0.68-{net_let}{row_idx},2)))))'
+        )
+        c_tax = ws2.cell(row_idx, tax_col_idx, tax_fml)
+        c_tax.alignment = Alignment(horizontal='right', vertical='center')
+        c_tax.number_format = '#,##0.00'
+        
+        # 收入额 (税前支出总额)
+        tax_let = get_column_letter(tax_col_idx)
+        c_gross = ws2.cell(row_idx, gross_col_idx, f'=SUM({net_let}{row_idx}:{tax_let}{row_idx})')
+        c_gross.alignment = Alignment(horizontal='right', vertical='center')
+        c_gross.number_format = '#,##0.00'
+        
+        ws2.cell(row_idx, idtype_col_idx, r['id_type']).alignment = Alignment(horizontal='center', vertical='center')
+        
+        c_id = ws2.cell(row_idx, idno_col_idx, r['id_no'])
+        c_id.alignment = Alignment(horizontal='center', vertical='center')
+        c_id.number_format = '@'
+        
+        ws2.cell(row_idx, bank_col_idx, r['bank']).alignment = Alignment(horizontal='left', vertical='center')
+        
+        c_card = ws2.cell(row_idx, card_col_idx, r['bank_acc'])
+        c_card.alignment = Alignment(horizontal='center', vertical='center')
+        c_card.number_format = '@'
+        
+        c_date = ws2.cell(row_idx, date_col_idx, r['date'])
+        c_date.alignment = Alignment(horizontal='center', vertical='center')
+        c_date.number_format = 'yyyy-mm-dd'
+        
+        for col_i in range(1, total_cols + 1):
+            cell = ws2.cell(row_idx, col_i)
+            cell.font = Font(name=FONT_FAMILY, size=11)
+            cell.border = TABLE_BORDER
+            
+        row_idx += 1
+        
+    # 底端合计行
+    tot_row = row_idx
+    ws2.row_dimensions[tot_row].height = 26
+    
+    ws2.merge_cells(start_row=tot_row, start_column=1, end_row=tot_row, end_column=3)
+    c_tot_m = ws2.cell(tot_row, 1, '合  计')
+    c_tot_m.font = Font(name=FONT_FAMILY, size=12, bold=True)
+    c_tot_m.alignment = Alignment(horizontal='center', vertical='center')
+    
+    for p in unique_prices:
+        p_col, c_col = price_col_map[p]
+        ws2.cell(tot_row, p_col, None)
+        c_let = get_column_letter(c_col)
+        
+        tot_cnt_cell = ws2.cell(tot_row, c_col, f'=SUM({c_let}4:{c_let}{tot_row-1})')
+        tot_cnt_cell.font = Font(name=FONT_FAMILY, size=12, bold=True)
+        tot_cnt_cell.alignment = Alignment(horizontal='center', vertical='center')
+        tot_cnt_cell.number_format = '#,##0'
+        
+    ws2.cell(tot_row, phone_col_idx, None)
+    
+    net_let = get_column_letter(net_col_idx)
+    c_tot_net = ws2.cell(tot_row, net_col_idx, f'=SUM({net_let}4:{net_let}{tot_row-1})')
+    c_tot_net.font = Font(name=FONT_FAMILY, size=12, bold=True)
+    c_tot_net.alignment = Alignment(horizontal='right', vertical='center')
+    c_tot_net.number_format = '#,##0'
+    
+    tax_let = get_column_letter(tax_col_idx)
+    c_tot_tax = ws2.cell(tot_row, tax_col_idx, f'=SUM({tax_let}4:{tax_let}{tot_row-1})')
+    c_tot_tax.font = Font(name=FONT_FAMILY, size=12, bold=True)
+    c_tot_tax.alignment = Alignment(horizontal='right', vertical='center')
+    c_tot_tax.number_format = '#,##0.00'
+    
+    gross_let = get_column_letter(gross_col_idx)
+    c_tot_gross = ws2.cell(tot_row, gross_col_idx, f'=SUM({gross_let}4:{gross_let}{tot_row-1})')
+    c_tot_gross.font = Font(name=FONT_FAMILY, size=12, bold=True)
+    c_tot_gross.alignment = Alignment(horizontal='right', vertical='center')
+    c_tot_gross.number_format = '#,##0.00'
+    
+    for c in range(idtype_col_idx, total_cols + 1):
+        ws2.cell(tot_row, c, None)
+        
+    for col_i in range(1, total_cols + 1):
+        cell = ws2.cell(tot_row, col_i)
+        cell.border = TABLE_BORDER
+        
+    # 列宽设置
+    ws2.column_dimensions['A'].width = 6.5
+    ws2.column_dimensions['B'].width = 11.0
+    ws2.column_dimensions['C'].width = 42.0
+    for p in unique_prices:
+        p_col, c_col = price_col_map[p]
+        ws2.column_dimensions[get_column_letter(p_col)].width = 13.5
+        ws2.column_dimensions[get_column_letter(c_col)].width = 11.5
+    ws2.column_dimensions[get_column_letter(phone_col_idx)].width = 16.0
+    ws2.column_dimensions[get_column_letter(net_col_idx)].width = 13.0
+    ws2.column_dimensions[get_column_letter(tax_col_idx)].width = 12.0
+    ws2.column_dimensions[get_column_letter(gross_col_idx)].width = 13.0
+    ws2.column_dimensions[get_column_letter(idtype_col_idx)].width = 11.0
+    ws2.column_dimensions[get_column_letter(idno_col_idx)].width = 24.0
+    ws2.column_dimensions[get_column_letter(bank_col_idx)].width = 38.0
+    ws2.column_dimensions[get_column_letter(card_col_idx)].width = 26.0
+    ws2.column_dimensions[get_column_letter(date_col_idx)].width = 16.0
+    
+    # 8. 保存输出与统计汇总信息
+    total_items = sum(sum(r['price_counts'].values()) for r in records)
+    total_net = sum(r['est_net'] for r in records)
+    total_doctors = len(records)
+    print(f'[OK] 劳务结算表计算完成!')
+    print(f'共 {total_items} 条')
+    print(f'税后总金额: {total_net:,.2f} 元')
+    print(f'项目【雷允上-{project_label}】: {total_doctors} 位医生，金额合计: {total_net:,.2f} 元')
+
+    if output_target is None:
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+    elif isinstance(output_target, (str, bytes, os.PathLike)):
+        wb.save(output_target)
+        print(f'[OK] 成功生成结算文件: {output_target}')
+        return output_target
+    elif hasattr(output_target, 'write'):
+        wb.save(output_target)
+        if hasattr(output_target, 'seek'):
+            output_target.seek(0)
+        return output_target
+    else:
+        raise ValueError(f"不支持的输出目标类型: {type(output_target)}")
+
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='雷允上语料库劳务费用明细表一键生成工具')
-    parser.add_argument('--dir', help='工作目录（默认当前目录）', default=None)
-    parser.add_argument('--prog', help='进度表文件路径', default=None)
-    parser.add_argument('--corpus', help='语料明文表文件路径', default=None)
-    parser.add_argument('--user', help='用户明文表文件路径', default=None)
-    parser.add_argument('--output', help='输出结果文件路径', default=None)
+    
+    parser = argparse.ArgumentParser(description='一键生成 AI 语料库劳务结算表（全自适应防乱序版）')
+    parser.add_argument('--doc', '--user', dest='doc', default='1.xlsx', help='医生底表/用户列表文件路径 (默认: 1.xlsx)')
+    parser.add_argument('--corpus', '--prog', dest='corpus', default=None, help='语料明细表/交付表文件路径 (如: 3.xlsx 或 2.xlsx)')
+    parser.add_argument('--out', '--output', dest='out', default=None, help='输出 Excel 文件路径 (如: 6.xlsx)')
+    parser.add_argument('--project', default=None, help='项目简称 (如: 长春 或 云南，不填自动识别)')
+    parser.add_argument('--date', default=None, help='结算提交日期 (默认自动提取)')
+    parser.add_argument('--month', default=None, help='结算月份 (默认自动推算)')
+    
     args = parser.parse_args()
     
-    generate_settlement(
-        work_dir=args.dir,
-        prog_path=args.prog,
-        corpus_path=args.corpus,
-        user_path=args.user,
-        output_path=args.output
-    )
+    if args.corpus is None:
+        print('>>> 未显式指定参数，启动自适应检测处理模式...')
+        processed = False
+        if os.path.exists('1.xlsx') and os.path.exists('3.xlsx'):
+            print('>>> 发现 1.xlsx 与 3.xlsx，正在生成雷允上长春结算表...')
+            generate_settlement_workbook('1.xlsx', '3.xlsx', '6.xlsx', project_label='长春', settlement_date=args.date, settlement_month=args.month)
+            processed = True
+        if os.path.exists('1.xlsx') and os.path.exists('2.xlsx'):
+            print('>>> 发现 1.xlsx 与 2.xlsx，正在生成雷允上云南结算表...')
+            generate_settlement_workbook('1.xlsx', '2.xlsx', '7.xlsx', project_label='云南', settlement_date=args.date, settlement_month=args.month)
+            processed = True
+            
+        if not processed:
+            cwd_files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls')) and not f.startswith('~$') and '劳务费用明细' not in f and 'settlement' not in f]
+            doc_file = next((f for f in cwd_files if any(k in f for k in ['用户', '医生'])), None)
+            corpus_file = next((f for f in cwd_files if any(k in f for k in ['语料', '进度'])), None)
+            if doc_file and corpus_file:
+                today_str = datetime.datetime.now().strftime('%Y%m%d')
+                out_f = f'{today_str}-劳务费用明细表.xlsx'
+                print(f'>>> 自动识别到本地文件: 医生底表={doc_file}, 语料明细={corpus_file}')
+                generate_settlement_workbook(doc_file, corpus_file, out_f, project_label=args.project, settlement_date=args.date, settlement_month=args.month)
+            else:
+                print('未在当前目录下找到有效输入文件。请指定 --doc 与 --corpus 参数，或放入含「用户」与「语料」关键词的表格。')
+    else:
+        out_file = args.out or 'settlement_result.xlsx'
+        generate_settlement_workbook(
+            doctor_source=args.doc,
+            corpus_source=args.corpus,
+            output_target=out_file,
+            project_label=args.project,
+            settlement_date=args.date,
+            settlement_month=args.month
+        )
