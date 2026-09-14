@@ -1749,54 +1749,151 @@ elif current_module == MODULE_JUMEI:
         key="upload_jumei"
     )
 
-    # 智能预识别嗅探
-    doc_name, corpus_name, prog_name = None, None, None
+    # 智能预识别嗅探（支持单项目及多项目交付表同时上传）
+    doc_file_obj = None
+    corpus_file_objs = []
+    detected_project_tags = []
+
     if uploaded_jumei_files:
+        # 1. 评分法高精度识别医生底表/用户明文表
+        scored_files = []
         for uf in uploaded_jumei_files:
             fname = uf.name.lower()
-            if ("用户" in fname or "医生" in fname or "底表" in fname) and ("进度" not in fname and "语料" not in fname and "费用" not in fname):
-                doc_name = uf.name
-            elif ("语料" in fname) and ("进度" not in fname and "费用" not in fname and "用户" not in fname):
-                corpus_name = uf.name
-            elif ("进度" in fname or "雷允上" in fname) and ("明文" not in fname and "费用" not in fname and "用户" not in fname):
-                prog_name = uf.name
+            score = 0
+            if any(k in fname for k in ["用户", "医生", "底表", "资质"]):
+                score += 20
+            if any(k in fname for k in ["语料", "交付", "进度", "题目"]):
+                score -= 20
 
-        # 内容兜底启发式探测
-        for uf in uploaded_jumei_files:
-            if uf.name in [doc_name, corpus_name, prog_name]:
-                continue
+            # 表头特征探测
             try:
-                df_head = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=2)
-                h_str = "".join([str(c) for c in df_head.columns])
-                if not doc_name and ("开户" in h_str or "支行" in h_str or "银行卡" in h_str or "卡号" in h_str):
-                    doc_name = uf.name
-                elif not corpus_name and ("语料" in h_str or "词条" in h_str or "题目" in h_str) and ("单价" in h_str or "审核" in h_str):
-                    corpus_name = uf.name
-                elif not prog_name and ("进度" in h_str or "项目" in h_str) and ("单价" in h_str or "审核" in h_str):
-                    prog_name = uf.name
+                df_head = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=3)
+                h_str = " ".join([str(c) for c in df_head.columns])
+                if any(k in h_str for k in ["开户行", "开户银行", "支行"]):
+                    score += 25
+                if any(k in h_str for k in ["银行卡", "卡号", "结算账号"]):
+                    score += 25
+                if any(k in h_str for k in ["身份证", "证件号", "证件号码"]):
+                    score += 15
+                if any(k in h_str for k in ["单价", "结算单价", "词条", "语料", "题目"]):
+                    score -= 20
+            except Exception:
+                pass
+            scored_files.append((score, uf))
+
+        # 得分最高且 >= 20 的判定为医生底表
+        scored_files.sort(key=lambda x: x[0], reverse=True)
+        if scored_files and scored_files[0][0] >= 20:
+            doc_file_obj = scored_files[0][1]
+        elif scored_files:
+            one_f = next((x[1] for x in scored_files if "1.xlsx" in x[1].name.lower()), None)
+            doc_file_obj = one_f or scored_files[0][1]
+
+        # 2. 其余所有文件自动归类为语料交付表 (支持单表或多项目交付表)
+        for _, uf in scored_files:
+            if doc_file_obj and uf.name == doc_file_obj.name:
+                continue
+            corpus_file_objs.append(uf)
+            # 探测该语料表涉及的项目
+            try:
+                df_c_head = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=100)
+                p_cols = [c for c in df_c_head.columns if any(k in str(c) for k in ["项目", "所属项目"])]
+                if p_cols:
+                    unique_p = df_c_head[p_cols[0]].dropna().unique()
+                    for p in unique_p:
+                        for tag in ["云南", "长春", "北京", "上海", "广州", "深圳", "四川", "山东"]:
+                            if tag in str(p) and tag not in detected_project_tags:
+                                detected_project_tags.append(tag)
+                for tag in ["云南", "长春", "北京", "上海", "广州", "深圳", "四川", "山东"]:
+                    if tag in uf.name and tag not in detected_project_tags:
+                        detected_project_tags.append(tag)
             except Exception:
                 pass
 
-        target_corpus = corpus_name or prog_name
+        # 智能匹配各卡槽表格
+        def _get_corpus_tag(uf_obj):
+            fname = uf_obj.name
+            for tag in ["云南", "长春", "北京", "上海", "广州", "深圳", "四川", "山东", "浙江", "江苏"]:
+                if tag in fname:
+                    return tag
+            try:
+                df_peek = pd.read_excel(io.BytesIO(uf_obj.getvalue()), nrows=50)
+                p_cols = [c for c in df_peek.columns if any(k in str(c) for k in ["项目", "所属项目"])]
+                if p_cols:
+                    for v in df_peek[p_cols[0]].dropna().astype(str):
+                        for tag in ["云南", "长春", "北京", "上海", "广州", "深圳", "四川", "山东", "浙江", "江苏"]:
+                            if tag in v:
+                                return tag
+            except Exception:
+                pass
+            return None
 
-        st.markdown("##### 实时文件嗅探匹配结果")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if doc_name:
-                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">01 医生底表 / 用户列表</div><div class="ios-status-card-val">{doc_name}</div></div>')
+        c_yunnan = next((f for f in corpus_file_objs if _get_corpus_tag(f) == "云南"), None)
+        c_changchun = next((f for f in corpus_file_objs if _get_corpus_tag(f) == "长春"), None)
+        remaining_corpus = [f for f in corpus_file_objs if f not in [c_yunnan, c_changchun]]
+
+        file_2_obj = c_yunnan or (corpus_file_objs[0] if corpus_file_objs else None)
+        if file_2_obj == c_yunnan:
+            file_3_obj = c_changchun or (remaining_corpus[0] if remaining_corpus else None)
+        else:
+            file_3_obj = corpus_file_objs[1] if len(corpus_file_objs) > 1 else None
+
+        extra_corpus = [f for f in corpus_file_objs if f not in [file_2_obj, file_3_obj]]
+
+        # 渲染识别状态指示条（与 Module 6 规范嗅探状态样式一致）
+        render_html('<div class="ios-precheck-box"><b>智能多表嗅探识别状态：</b><br>')
+        chk_cols = st.columns(3)
+        with chk_cols[0]:
+            if doc_file_obj:
+                render_html(f'<span class="ios-badge-success">1. 医生底表 / 用户列表：已锁定</span><br><small style="opacity:0.8;">{doc_file_obj.name}</small>', container=chk_cols[0])
             else:
-                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">01 医生底表 / 用户列表</div><div class="ios-status-card-val">未识别 (需包含“用户”或“医生”)</div></div>')
-        with c2:
-            if target_corpus:
-                tag_label = "语料交付表" if target_corpus == corpus_name else "进度表(替代语料交付)"
-                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">02 {tag_label}</div><div class="ios-status-card-val">{target_corpus}</div></div>')
+                render_html('<span class="ios-badge-pending">待识别：1. 医生底表 / 用户列表 (1.xlsx)</span>', container=chk_cols[0])
+
+        with chk_cols[1]:
+            if file_2_obj:
+                t2 = _get_corpus_tag(file_2_obj)
+                t2_str = f" ({t2})" if t2 else ""
+                render_html(f'<span class="ios-badge-success">2. 语料交付表{t2_str}：已锁定</span><br><small style="opacity:0.8;">{file_2_obj.name}</small>', container=chk_cols[1])
             else:
-                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">02 语料交付表</div><div class="ios-status-card-val">未识别 (需包含“语料”或“进度”)</div></div>')
-        with c3:
-            if prog_name and corpus_name:
-                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">03 辅助进度表 (可选)</div><div class="ios-status-card-val">{prog_name}</div></div>')
+                render_html('<span class="ios-badge-pending">待识别：2. 语料交付表 (2.xlsx)</span>', container=chk_cols[1])
+
+        with chk_cols[2]:
+            if file_3_obj:
+                t3 = _get_corpus_tag(file_3_obj)
+                t3_str = f" ({t3})" if t3 else ""
+                extra_note = f"<br><small style='opacity:0.75;'>另有 {len(extra_corpus)} 个额外项目交付表已锁定</small>" if extra_corpus else ""
+                render_html(f'<span class="ios-badge-success">3. 语料交付/辅助表{t3_str}：已锁定</span><br><small style="opacity:0.8;">{file_3_obj.name}</small>{extra_note}', container=chk_cols[2])
+            elif len(corpus_file_objs) == 1:
+                render_html('<span class="ios-badge-pending" style="background:rgba(2,132,199,0.08);color:#0284c7;border-color:rgba(2,132,199,0.25);">3. 辅助进度/新项目表：可选 (当前单表模式)</span>', container=chk_cols[2])
             else:
-                render_html('<div class="ios-status-card neutral"><div class="ios-status-card-title">03 辅助进度表 (可选)</div><div class="ios-status-card-val">无需或已自动融合</div></div>')
+                render_html('<span class="ios-badge-pending">待识别：3. 语料交付/辅助进度表 (3.xlsx)</span>', container=chk_cols[2])
+
+        # 智能状态说明条
+        if detected_project_tags:
+            ordered_tags = []
+            if "长春" in detected_project_tags:
+                ordered_tags.append("长春 (6.xlsx)")
+            if "云南" in detected_project_tags:
+                ordered_tags.append("云南 (7.xlsx)")
+            next_idx = 8
+            for t in detected_project_tags:
+                if t not in ["长春", "云南"]:
+                    ordered_tags.append(f"{t} ({next_idx}.xlsx)")
+                    next_idx += 1
+            split_desc = "、".join(ordered_tags)
+            info_text = f"已自动嗅探识别到 <b>{len(detected_project_tags)} 个独立项目</b>（{split_desc}），将自动拆分为独立 Excel 并生成 ZIP 打包。"
+        else:
+            info_text = "系统将全自动读取【结算单价】档位、手机号精确匹配与个税核销，无需手动配置参数。"
+
+        render_html(f"""
+        <div style="margin: 12px 0 16px 0; padding: 12px 18px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 13px; color: #166534; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                <span><b>自动智能嗅探与拆分</b>：{info_text}</span>
+            </div>
+            <div style="font-size: 12px; color: #15803d; opacity: 0.85;">多项目独立拆分引擎</div>
+        </div>
+        """)
 
     # 操作按钮黄金居中排布
     _, col_btn, _ = st.columns([1, 1.8, 1])
@@ -1804,40 +1901,38 @@ elif current_module == MODULE_JUMEI:
         start_jumei = st.button(f"开始生成：{MODULE_JUMEI}", type="primary", use_container_width=True)
 
     if start_jumei:
-        target_corpus = corpus_name or prog_name
         if not uploaded_jumei_files or len(uploaded_jumei_files) < 2:
-            st.error("请上传至少 2 个源数据文件（医生底表/用户明文表、语料交付表/进度表）后再次点击生成。")
-        elif not (doc_name and target_corpus):
+            st.error("请上传至少 2 个源数据文件（1 个医生底表 + 至少 1 个语料交付表）后再次点击生成。")
+        elif not (doc_file_obj and corpus_file_objs):
             st.warning("系统未能自动匹配必要表格，请确认上传了「用户/医生」底表与「语料/进度」交付表。")
         else:
             with st.status("正在启动陈菊梅基金会雷允上劳务结算引擎...", expanded=True) as status:
                 st.write("1. 正在初始化沙箱运行隔离环境...")
                 temp_dir = tempfile.mkdtemp(prefix="jumei_settle_")
                 try:
-                    doc_file_obj = next(f for f in uploaded_jumei_files if f.name == doc_name)
-                    corpus_file_obj = next(f for f in uploaded_jumei_files if f.name == target_corpus)
-
                     u_path = os.path.join(temp_dir, doc_file_obj.name)
-                    c_path = os.path.join(temp_dir, corpus_file_obj.name)
-
                     with open(u_path, "wb") as f:
                         f.write(doc_file_obj.getvalue())
-                    with open(c_path, "wb") as f:
-                        f.write(corpus_file_obj.getvalue())
+
+                    c_paths = []
+                    for c_obj in corpus_file_objs:
+                        c_p = os.path.join(temp_dir, c_obj.name)
+                        with open(c_p, "wb") as f:
+                            f.write(c_obj.getvalue())
+                        c_paths.append(c_p)
 
                     today_str = datetime.datetime.now().strftime("%Y%m%d")
-                    out_name = f"{today_str}-劳务费用明细表.xlsx"
-                    out_path = os.path.join(temp_dir, out_name)
 
                     script_path = os.path.join(ROOT_DIR, "陈菊梅基金会-雷允上结算包", "generate_settlement.py")
-                    st.write("2. 正在执行全数据驱动单价动态提取、开户行智能清洗与劳务个税核销...")
+                    st.write("2. 正在执行多项目独立拆分(6/7/8...)、全数据驱动单价动态提取、开户行智能清洗与劳务个税核销...")
 
                     cmd = [
                         sys.executable,
                         script_path,
                         "--doc", u_path,
-                        "--corpus", c_path,
-                        "--out", out_path
+                        "--corpus"
+                    ] + c_paths + [
+                        "--out_dir", temp_dir
                     ]
 
                     env = os.environ.copy()
@@ -1854,55 +1949,87 @@ elif current_module == MODULE_JUMEI:
                         env=env
                     )
 
-                    if proc.returncode == 0 and os.path.exists(out_path):
-                        status.update(label="结算包生成完成！", state="complete")
-                        with open(out_path, "rb") as f:
-                            excel_bytes = f.read()
+                    uploaded_names = set([doc_file_obj.name] + [c.name for c in corpus_file_objs])
+                    all_xlsx = [f for f in os.listdir(temp_dir) if f.endswith(".xlsx") and f not in uploaded_names]
+                    named_files = [f for f in all_xlsx if "-劳务费用明细表.xlsx" in f]
+                    if not named_files:
+                        named_files = [f for f in all_xlsx if re.match(r'^\d+\.xlsx$', f)] or all_xlsx
+                    named_files.sort()
 
-                        st.success("成功生成劳务费用明细表，包含项目结算表与各单价明细表！")
+                    zip_fn = "劳务费用明细表_全部独立项目包.zip"
+                    zip_fp = os.path.join(temp_dir, zip_fn)
+                    has_zip = os.path.exists(zip_fp)
+
+                    if proc.returncode == 0 and named_files:
+                        status.update(label="独立项目结算表生成完成！", state="complete")
+                        st.success(f"成功生成 {len(named_files)} 份独立项目劳务结算 Excel 文件（各文件均含专属的项目结算表与医生明细表）！")
 
                         # 提取 KPI 数据
                         total_items = re.search(r'共\s*(\d+)\s*条', proc.stdout)
                         total_amt = re.search(r'税后总金额:\s*([0-9\.,]+)\s*元', proc.stdout)
-                        proj_matches = re.findall(r'项目【(.*?)】:\s*(\d+)\s*位医生，金额合计:\s*([0-9\.,]+)\s*元', proc.stdout)
-
+                        proj_matches = re.findall(r'项目【(.*?)】.*?(\d+)\s*位医生.*?(\d+)\s*条语料.*?金额合计:\s*([0-9\.,]+)\s*元', proc.stdout)
                         total_docs = sum(int(m[1]) for m in proj_matches) if proj_matches else None
 
                         st.markdown("##### 本期结算核心 KPI 看板")
                         k1, k2, k3, k4 = st.columns(4)
                         with k1:
-                            st.metric("结算总人数", f"{total_docs} 位医生" if total_docs is not None else "已核算")
+                            st.metric("独立结算表数", f"{len(named_files)} 个独立 Excel")
                         with k2:
-                            st.metric("语料词条数", f"{total_items.group(1)} 条" if total_items else "已核算")
+                            st.metric("结算总人数", f"{total_docs} 位医生" if total_docs is not None else "已核算")
                         with k3:
-                            st.metric("税后总金额", f"¥ {total_amt.group(1)}" if total_amt else "已核算")
+                            st.metric("语料词条数", f"{total_items.group(1)} 条" if total_items else "已核算")
                         with k4:
-                            st.metric("涉及项目数", f"{len(proj_matches)} 个项目" if proj_matches else "已核算")
+                            st.metric("税后总金额", f"¥ {total_amt.group(1)}" if total_amt else "已核算")
 
-                        # 居中下载大按钮
-                        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
-                        _, col_dl, _ = st.columns([1, 1.6, 1])
-                        with col_dl:
-                            st.download_button(
-                                label=f"下载【{out_name}】 ({format_size(len(excel_bytes))})",
-                                data=excel_bytes,
-                                file_name=out_name,
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
+                        # 下载专区
+                        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+                        if has_zip:
+                            with open(zip_fp, "rb") as zf:
+                                zip_bytes = zf.read()
+                            st.markdown("##### 📦 一键打包下载全部独立表格")
+                            _, col_dl_zip, _ = st.columns([1, 1.8, 1])
+                            with col_dl_zip:
+                                st.download_button(
+                                    label=f"📦 一键打包下载全部项目独立结算表 (ZIP · {format_size(len(zip_bytes))})",
+                                    data=zip_bytes,
+                                    file_name=f"{today_str}-雷允上全项目劳务结算包.zip",
+                                    mime="application/zip",
+                                    type="primary",
+                                    use_container_width=True
+                                )
 
-                        # 数据多 Sheet 在线预览
-                        st.markdown("##### 报表工作表 (Sheet) 在线预览")
-                        try:
-                            xl_file = pd.ExcelFile(io.BytesIO(excel_bytes))
-                            sheet_tabs = st.tabs(xl_file.sheet_names)
-                            for idx, sname in enumerate(xl_file.sheet_names):
-                                with sheet_tabs[idx]:
-                                    df_sheet = pd.read_excel(xl_file, sheet_name=sname)
-                                    st.caption(f"工作表【{sname}】共 {len(df_sheet)} 行数据（展示前 100 行）：")
-                                    st.dataframe(df_sheet.head(100), use_container_width=True)
-                        except Exception as e:
-                            st.info("数据预览生成完毕，您可以直接点击上方按钮下载 Excel 文件查看完整格式与公式。")
+                        st.markdown("##### 📄 各项目独立结算表单独下载")
+                        dl_cols = st.columns(min(len(named_files), 3))
+                        for i, fn in enumerate(named_files):
+                            c_idx = i % min(len(named_files), 3)
+                            fp = os.path.join(temp_dir, fn)
+                            with open(fp, "rb") as ef:
+                                f_bytes = ef.read()
+                            with dl_cols[c_idx]:
+                                st.download_button(
+                                    label=f"⬇️ 下载【{fn}】 ({format_size(len(f_bytes))})",
+                                    data=f_bytes,
+                                    file_name=fn,
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True,
+                                    key=f"dl_single_proj_{i}"
+                                )
+
+                        # 多独立工作簿在线预览
+                        st.markdown("##### 📑 独立项目工作簿在线预览")
+                        proj_tabs = st.tabs([f"📄 {fn}" for fn in named_files])
+                        for p_idx, fn in enumerate(named_files):
+                            with proj_tabs[p_idx]:
+                                fp = os.path.join(temp_dir, fn)
+                                with open(fp, "rb") as ef:
+                                    f_bytes = ef.read()
+                                xl_file = pd.ExcelFile(io.BytesIO(f_bytes))
+                                inner_tabs = st.tabs([f"Sheet: {s}" for s in xl_file.sheet_names])
+                                for s_idx, sname in enumerate(xl_file.sheet_names):
+                                    with inner_tabs[s_idx]:
+                                        df_sheet = pd.read_excel(xl_file, sheet_name=sname)
+                                        st.caption(f"【{fn}】之工作表【{sname}】共 {len(df_sheet)} 行数据（展示前 100 行）：")
+                                        st.dataframe(df_sheet.head(100), use_container_width=True)
 
                         with st.expander("查看数据映射与结算执行完整日志", expanded=False):
                             st.code(proc.stdout)
