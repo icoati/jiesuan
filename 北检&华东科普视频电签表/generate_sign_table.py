@@ -115,6 +115,63 @@ def resolve_hospital_city(hospital_name, default_prov='山西省', default_city=
         
     return default_prov, default_city
 
+def format_bank_and_branch(bank_val, branch_val):
+    """
+    智能合并银行名称与支行名称形成最终开户行：
+    1. 抓取源文件中的 银行名称 + 支行名称 合并到一起，形成完整开户行；
+    2. 若两者完全相同或一方已包含另一方，智能去重，避免重复拼接（例如避免 交通银行 + 交通银行太原文源巷支行 => 交通银行交通银行太原文源巷支行）；
+    3. 若银行名称本身已包含完整支行（如以“支行”、“营业部”结尾），直接保留；
+    4. 规范化处理支行开头的银行简写（如 农行/工行/建行）；
+    5. 缺失其一则取非空者；
+    6. 正常情况下将【银行名称 + 支行名称】拼接输出（如 中国建设银行 + 交城新开路支行 => 中国建设银行交城新开路支行）。
+    """
+    b = str(bank_val).strip() if pd.notna(bank_val) and str(bank_val).strip() not in ['nan', 'None', '未识别'] else ''
+    br = str(branch_val).strip() if pd.notna(branch_val) and str(branch_val).strip() not in ['nan', 'None', '未识别'] else ''
+
+    if not b and not br:
+        return ''
+    if not br:
+        return b
+    if not b:
+        return br
+
+    # 1. 若两者完全一致
+    if b == br:
+        return b
+
+    # 2. 若支行已包含完整银行名称（如 银行=交通银行，支行=交通银行太原文源巷支行）
+    if b in br:
+        return br
+
+    # 3. 若银行已包含完整支行名称（如 银行=中国银行太原双塔东街支行，支行=太原双塔东街支行）
+    if br in b:
+        return b
+
+    # 4. 若银行名称本身已经是一个完整的支行/分行营业部（以支行、营业部结尾）
+    if b.endswith('支行') or b.endswith('营业部'):
+        return b
+
+    # 5. 处理支行中包含的常见银行简写（如 农行/工行/建行）
+    for short_b, full_b in [
+        ('工行', '中国工商银行'), ('工商银行', '中国工商银行'),
+        ('建行', '中国建设银行'), ('建设银行', '中国建设银行'),
+        ('农行', '中国农业银行'), ('农业银行', '中国农业银行'),
+        ('中行', '中国银行')
+    ]:
+        if b == full_b or b == short_b:
+            if br.startswith(short_b):
+                return b + br[len(short_b):]
+            if br.startswith(full_b):
+                return br
+
+    # 6. 处理银行与支行含相同银行主体关键词
+    for kw in ['工商银行', '建设银行', '农业银行', '中国银行', '交通银行', '民生银行', '光大银行', '招商银行', '华夏银行', '邮政储蓄银行']:
+        if kw in b and kw in br:
+            return br if len(br) >= len(b) else b
+
+    # 7. 银行名称 + 支行名称合并
+    return b + br
+
 def read_source_df(source):
     """安全读取源数据 DataFrame (支持路径、bytes、BytesIO)"""
     if isinstance(source, pd.DataFrame):
@@ -204,8 +261,8 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
         bank_name = str(u[col_u_bank]).strip() if col_u_bank and pd.notna(u[col_u_bank]) else ""
         branch_name = str(u[col_u_branch]).strip() if col_u_branch and pd.notna(u[col_u_branch]) else ""
         
-        # 智能整合开户行：优先使用银行名称，若无则使用支行名称 (与科普电签表1.xlsx 100% 严格一致)
-        full_bank = bank_name or branch_name
+        # 抓取源文件中的 银行名称+支行名称合并到一起，形成开户行 (智能去重与规范化)
+        full_bank = format_bank_and_branch(bank_name, branch_name)
 
         u_dict = {
             '姓名': str(u[col_u_name]).strip() if col_u_name and pd.notna(u[col_u_name]) else "",
