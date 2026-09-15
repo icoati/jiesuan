@@ -26,6 +26,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+import history_manager
 
 # 项目根目录
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -1087,6 +1088,9 @@ if current_module == MODULE_SHANGYAO:
     </div>
     """)
 
+    # 历史归档抽屉 (位于顶部横幅下方)
+    history_manager.render_history_ui(MODULE_SHANGYAO)
+
     render_html("""
     <div class="bento-req-container">
         <div class="bento-req-header">
@@ -1211,6 +1215,10 @@ if current_module == MODULE_SHANGYAO:
                         if '任务数量' in df_sum.columns:
                             total_tasks = df_sum['任务数量'].dropna().iloc[-1]
 
+                        # 自动归档至历史记录
+                        kpi_summary = f"覆盖省份 {prov_count} 个 · 总任务 {int(total_tasks) if str(total_tasks).isdigit() else total_tasks} 份 · 人员规模 {len(df_staff)} 位专家"
+                        history_manager.save_run(MODULE_SHANGYAO, {"统计总表.xlsx": result_bytes}, summary=kpi_summary)
+
                         st.markdown("##### 核心业务 KPI 概览")
                         c1, c2, c3 = st.columns(3)
                         with c1:
@@ -1271,6 +1279,9 @@ elif current_module == MODULE_ZHENGHE:
         </div>
     </div>
     """)
+
+    # 历史归档抽屉 (位于顶部横幅下方)
+    history_manager.render_history_ui(MODULE_ZHENGHE)
 
     render_html("""
     <div class="bento-req-container">
@@ -1434,6 +1445,12 @@ print("SUCCESS_OUT2:" + str(out2))
                         doc_count_match = re.search(r'汇总完成[^\d]*(\d+)[^\d]*位医生', proc.stdout)
                         amount_match = re.search(r'劳务实发总额[^\d]*([0-9\.,]+)', proc.stdout)
 
+                        # 自动归档至历史记录
+                        doc_cnt = doc_count_match.group(1) if doc_count_match else f"{len(gen_files)}"
+                        amt_str = amount_match.group(1) if amount_match else "已核算平账"
+                        kpi_summary = f"本次结算专家数 {doc_cnt} 人 · 实发劳务总金额 ¥ {amt_str}"
+                        history_manager.save_run(MODULE_ZHENGHE, gen_files, summary=kpi_summary)
+
                         st.markdown("##### 结算对账 KPI 看板")
                         k1, k2 = st.columns(2)
                         with k1:
@@ -1497,6 +1514,9 @@ elif current_module == MODULE_CORPUS:
         </div>
     </div>
     """)
+
+    # 历史归档抽屉 (位于顶部横幅下方)
+    history_manager.render_history_ui(MODULE_CORPUS)
 
     render_html("""
     <div class="bento-req-container">
@@ -1644,6 +1664,13 @@ elif current_module == MODULE_CORPUS:
                         corp_cnt = re.search(r'本期结算语料数\s*:\s*(\d+)', proc.stdout)
                         amt_cnt = re.search(r'本期应付总金额\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
 
+                        # 自动归档至历史记录
+                        d_str = f"{doc_cnt.group(1)} 位医生" if doc_cnt else "已校验"
+                        c_str = f"{corp_cnt.group(1)} 条" if corp_cnt else "已校验"
+                        a_str = f"¥ {amt_cnt.group(1)}" if amt_cnt else "已校验"
+                        kpi_summary = f"结算总人数 {d_str} · 结算语料数 {c_str} · 应付总金额 {a_str}"
+                        history_manager.save_run(MODULE_CORPUS, output_files, summary=kpi_summary)
+
                         st.markdown("##### 本期结算核心 KPI 看板")
                         m1, m2, m3 = st.columns(3)
                         with m1:
@@ -1716,6 +1743,9 @@ elif current_module == MODULE_JUMEI:
         </div>
     </div>
     """)
+
+    # 历史归档抽屉 (位于顶部横幅下方)
+    history_manager.render_history_ui(MODULE_JUMEI)
 
     render_html("""
     <div class="bento-req-container">
@@ -1980,6 +2010,20 @@ elif current_module == MODULE_JUMEI:
                         proj_matches = re.findall(r'项目【(.*?)】.*?(\d+)\s*位医生.*?(\d+)\s*条语料.*?金额合计:\s*([0-9\.,]+)\s*元', proc.stdout)
                         total_docs = sum(int(m[1]) for m in proj_matches) if proj_matches else None
 
+                        # 自动归档至历史记录
+                        jumei_files = {}
+                        for fn in named_files:
+                            fp = os.path.join(temp_dir, fn)
+                            if os.path.exists(fp):
+                                with open(fp, "rb") as ef:
+                                    jumei_files[fn] = ef.read()
+                        if has_zip and os.path.exists(zip_fp):
+                            with open(zip_fp, "rb") as zf:
+                                jumei_files[f"{today_str}-雷允上全项目劳务结算包.zip"] = zf.read()
+
+                        kpi_summary = f"结算表 {len(named_files)} 个 · 专家 {total_docs if total_docs is not None else '多'} 位 · 语料 {total_items.group(1) if total_items else '多'} 条 · 金额 ¥ {total_amt.group(1) if total_amt else '平账'}"
+                        history_manager.save_run(MODULE_JUMEI, jumei_files, summary=kpi_summary)
+
                         st.markdown("##### 本期结算核心 KPI 看板")
                         k1, k2, k3, k4 = st.columns(4)
                         with k1:
@@ -2078,6 +2122,9 @@ elif current_module == MODULE_SAAS:
         </div>
     </div>
     """)
+
+    # 历史归档抽屉 (位于顶部横幅下方)
+    history_manager.render_history_ui(MODULE_SAAS)
 
     render_html("""
     <div class="bento-req-container">
@@ -2350,6 +2397,19 @@ elif current_module == MODULE_SAAS:
                                             zf.write(dedup_stats["output_excluded_excel"], arcname="已剔除系统已有机构名单.xlsx")
                                     zip_bytes = zip_buffer.getvalue()
 
+                                # 自动归档至历史记录
+                                saas_files = {out_file_name: filled_excel_bytes}
+                                if excluded_bytes and dedup_stats and dedup_stats.get("total_excluded", 0) > 0:
+                                    saas_files[f"已剔除系统已有机构名单_{uploaded_saas_file.name}"] = excluded_bytes
+                                if zip_bytes:
+                                    saas_files[zip_name] = zip_bytes
+
+                                if is_dedup_flow and dedup_stats:
+                                    saas_summary = f"录入模板 {total_rows} 家 · 剔除系统已有 {dedup_stats['excluded_kb_count']} 家 · 自身去重 {dedup_stats['excluded_internal_count']} 家 · 分批 {len(batch_files)} 包"
+                                else:
+                                    saas_summary = f"录入模板 {total_rows} 家 · 有等级 {rated_count} 家 · 定级率 {rated_count/max(total_rows,1)*100:.1f}% · 分批 {len(batch_files)} 包"
+                                history_manager.save_run(MODULE_SAAS, saas_files, summary=saas_summary)
+
                                 # 居中下载按钮组
                                 st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
                                 if zip_bytes:
@@ -2432,6 +2492,9 @@ elif current_module == MODULE_BEIJIAN:
         </div>
     </div>
     """)
+
+    # 历史归档抽屉 (位于顶部横幅下方)
+    history_manager.render_history_ui(MODULE_BEIJIAN)
 
     render_html("""
     <div class="bento-req-container">
@@ -2620,6 +2683,13 @@ elif current_module == MODULE_BEIJIAN:
 
                         zip_bytes = create_zip_archive(all_outputs)
 
+                        # 自动归档至历史记录
+                        beijian_hist_files = dict(all_outputs)
+                        if zip_bytes:
+                            beijian_hist_files[f"北检康恩贝结算全套表单_{res['total_items']}条_{res['total_doctors']}人.zip"] = zip_bytes
+                        beijian_summary = f"结算专家 {res.get('total_doctors', 0)} 位 · 语料词条 {res.get('total_items', 0)} 篇 · 实发总额 ¥ {res.get('total_net', 0):,.2f} · 税前 ¥ {res.get('total_gross', 0):,.2f}"
+                        history_manager.save_run(MODULE_BEIJIAN, beijian_hist_files, summary=beijian_summary)
+
                         # 下载按钮组
                         st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
                         _, col_dl_zip, _ = st.columns([1, 1.8, 1])
@@ -2722,6 +2792,9 @@ elif current_module == MODULE_KOPU:
         </div>
     </div>
     """)
+
+    # 历史归档抽屉 (位于顶部横幅下方)
+    history_manager.render_history_ui(MODULE_KOPU)
 
     render_html("""
     <div class="bento-req-container">
@@ -2875,6 +2948,10 @@ elif current_module == MODULE_KOPU:
                         with open(out_path, "rb") as ef:
                             out_bytes = ef.read()
 
+                        # 自动归档至历史记录
+                        kopu_summary = f"{stats['total_doctors']} 位专家 · {stats['total_tasks']} 条视频 · 劳务总额 ¥ {stats['total_amount']:,} 元 · 匹配率 {stats['matched_rate']}"
+                        history_manager.save_run(MODULE_KOPU, {"科普电签表.xlsx": out_bytes}, summary=kopu_summary)
+
                         _, col_dl, _ = st.columns([1, 1.8, 1])
                         with col_dl:
                             st.download_button(
@@ -2904,8 +2981,3 @@ elif current_module == MODULE_KOPU:
                         shutil.rmtree(temp_dir)
                     except Exception:
                         pass
-
-
-
-
-
