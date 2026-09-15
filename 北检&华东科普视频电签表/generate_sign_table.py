@@ -172,6 +172,33 @@ def format_bank_and_branch(bank_val, branch_val):
     # 7. 银行名称 + 支行名称合并
     return b + br
 
+def extract_top_activity_name(activity_list, default_name='健康之舟，医路通行'):
+    """
+    根据规则从【参与活动】列提取出现频次最多的活动名称：
+    1. 逐行读取参与活动内容；
+    2. 若单行包含多个活动（如用顿号 '、'、分号 ';' 或 '；'、换行符 '\n'、竖线 '|'、斜杠 '/' 分隔），拆分为独立活动项；
+    3. 统计各活动名称在所有行中的出现频次（同一行包含去重后计 1 次）；
+    4. 选取出现频次最高（数量最多）的活动名称，作为全表统一的项目名称*；
+    5. 若均为空则回退到默认兜底名称。
+    """
+    from collections import Counter
+    counter = Counter()
+    for s in activity_list:
+        if not s or pd.isna(s):
+            continue
+        val_str = str(s).strip()
+        if val_str in ['', 'nan', 'None']:
+            continue
+        # 以 顿号、分号、换行、竖线、斜杠 分隔多个活动名称
+        items = [x.strip() for x in re.split(r'[、;；\n|/]+', val_str) if x.strip()]
+        for item in set(items):
+            counter[item] += 1
+
+    if counter:
+        top_act, cnt = counter.most_common(1)[0]
+        return top_act
+    return default_name
+
 def read_source_df(source):
     """安全读取源数据 DataFrame (支持路径、bytes、BytesIO)"""
     if isinstance(source, pd.DataFrame):
@@ -248,6 +275,7 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
     col_u_branch = next((c for c in df_users.columns if any(k in str(c) for k in ['支行名称', '支行'])), None)
     col_u_hosp = next((c for c in df_users.columns if any(k in str(c) for k in ['所在医院', '医院', '单位'])), None)
     col_u_title = next((c for c in df_users.columns if any(k in str(c) for k in ['职称', '医务职称'])), None)
+    col_u_proj = next((c for c in df_users.columns if any(k in str(c) for k in ['参与活动', '活动名称', '项目名称', '项目'])), None)
 
     # 建立用户信息映射
     user_map_by_id = {}
@@ -263,6 +291,7 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
         
         # 抓取源文件中的 银行名称+支行名称合并到一起，形成开户行 (智能去重与规范化)
         full_bank = format_bank_and_branch(bank_name, branch_name)
+        user_proj = str(u[col_u_proj]).strip() if col_u_proj and pd.notna(u[col_u_proj]) else ""
 
         u_dict = {
             '姓名': str(u[col_u_name]).strip() if col_u_name and pd.notna(u[col_u_name]) else "",
@@ -272,6 +301,7 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
             '开户行': full_bank,
             '工作单位': str(u[col_u_hosp]).strip() if col_u_hosp and pd.notna(u[col_u_hosp]) else "",
             '医务职称': str(u[col_u_title]).strip() if col_u_title and pd.notna(u[col_u_title]) else "",
+            '参与活动': user_proj,
         }
         if cid:
             user_map_by_id[cid] = u_dict
@@ -285,6 +315,21 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
 
     total_amount = 0
     total_tasks_count = len(matched_details)
+
+    # 动态分析本批次【参与活动】列：按规则统计出现数量最多的活动名称作为项目名称*
+    candidate_acts = []
+    if col_d_proj and matched_details[col_d_proj].dropna().astype(str).str.strip().ne('').any():
+        candidate_acts = matched_details[col_d_proj].dropna().tolist()
+    elif col_u_proj:
+        for group_key, grp in grouped:
+            cid_str = normalize_text_val(grp[col_d_cid].iloc[0]) if col_d_cid else ""
+            phone_str = normalize_text_val(grp[col_d_phone].iloc[0]) if col_d_phone else ""
+            u_info = user_map_by_id.get(cid_str) or user_map_by_phone.get(phone_str) or {}
+            act_val = u_info.get('参与活动', '')
+            if act_val:
+                candidate_acts.append(act_val)
+
+    global_proj_name = extract_top_activity_name(candidate_acts, default_name='健康之舟，医路通行')
 
     for group_key, grp in grouped:
         cid_str = normalize_text_val(grp[col_d_cid].iloc[0]) if col_d_cid else ""
@@ -313,11 +358,6 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
         if not name and u_info.get('姓名'):
             name = u_info.get('姓名')
 
-        # 项目名称
-        proj_name = '健康之舟，医路通行'
-        if col_d_proj and pd.notna(grp[col_d_proj].iloc[0]) and str(grp[col_d_proj].iloc[0]).strip():
-            proj_name = str(grp[col_d_proj].iloc[0]).strip()
-
         # 省市映射
         prov, city = resolve_hospital_city(hosp)
 
@@ -327,7 +367,7 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
             '开始月*': None,
             '终止年*': None,
             '终止月*': None,
-            '项目名称*': proj_name,
+            '项目名称*': global_proj_name,
             '金额*': points_sum,  # 纯整数，杜绝逗号与小数
             '姓名1*': name,
             '省份*': prov,
