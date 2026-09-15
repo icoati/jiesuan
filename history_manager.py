@@ -30,6 +30,39 @@ HISTORY_BASE_DIR = os.path.join(ROOT_DIR, "history_records")
 # 每个模块最大保留记录数 (VPS 40G 空间充裕，默认保留 200 条)
 MAX_HISTORY_PER_MODULE = 200
 
+# 强制统一为中国北京时间 (Asia/Shanghai, UTC+8)
+# 在 Linux / VPS 上自动同步系统时区，彻底消除 VPS 默认为 UTC 导致的时间慢 8 小时问题
+if hasattr(time, 'tzset'):
+    try:
+        os.environ['TZ'] = 'Asia/Shanghai'
+        time.tzset()
+    except Exception:
+        pass
+
+BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+def get_beijing_now() -> datetime.datetime:
+    """获取标准的中国北京时间 (UTC+8)"""
+    return datetime.datetime.now(BEIJING_TZ)
+
+def format_record_timestamp(rec: dict) -> str:
+    """
+    统一将历史记录时间格式化为中国北京时间 (UTC+8)
+    自动识别旧版在 UTC VPS 环境下生成的无时区标记记录，智能换算 +8 小时
+    """
+    ts_str = rec.get("timestamp", "")
+    if not ts_str or ts_str == "未知时间":
+        return "未知时间"
+    # 已标记为 UTC+8 的新记录，直接使用
+    if rec.get("timezone") in ["UTC+8", "UTC+8 (北京时间)"]:
+        return ts_str
+    # 兼容处理未标记时区的历史记录（若在 UTC VPS 上生成，自动换算为北京时间）
+    try:
+        dt = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        return (dt + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return ts_str
+
 
 def _format_size(num_bytes: int) -> str:
     """人性化文件大小格式化"""
@@ -73,7 +106,7 @@ def save_run(module_name: str, files_dict: dict, summary: str = "") -> str:
         return ""
 
     m_dir = get_module_history_dir(module_name)
-    now = datetime.datetime.now()
+    now = get_beijing_now()
     # 采用 时间戳 + 微秒四位 保证严格唯一且天然时间序
     run_id = f"{now.strftime('%Y%m%d_%H%M%S')}_{int(time.time() * 1000) % 10000:04d}"
     run_dir = os.path.join(m_dir, run_id)
@@ -112,11 +145,12 @@ def save_run(module_name: str, files_dict: dict, summary: str = "") -> str:
             "is_auto_zip": True
         })
 
-    # 3. 写入元数据 meta.json
+    # 3. 写入元数据 meta.json (显式记录中国北京时间与时区)
     meta = {
         "run_id": run_id,
         "module": module_name,
         "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "timezone": "UTC+8 (北京时间)",
         "summary": summary.strip(),
         "files": file_meta_list
     }
@@ -234,7 +268,7 @@ def render_history_ui(module_name: str):
         # 遍历每条历史记录
         for r_idx, rec in enumerate(records):
             run_id = rec.get("run_id", f"r_{r_idx}")
-            timestamp = rec.get("timestamp", "未知时间")
+            timestamp = format_record_timestamp(rec)
             summary = rec.get("summary", "")
             files = rec.get("files", [])
             dir_path = rec.get("dir_path", "")
@@ -245,7 +279,10 @@ def render_history_ui(module_name: str):
                     f"""
                     <div style="background:#ffffff; border:1px solid #e5e7eb; border-left:4px solid #0284c7; border-radius:6px; padding:10px 14px; margin-bottom:10px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                            <span style="font-size:14px; font-weight:600; color:#1e293b;">📅 {timestamp}</span>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:14px; font-weight:600; color:#1e293b;">📅 {timestamp}</span>
+                                <span style="font-size:11px; color:#0284c7; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 6px; border-radius:4px; font-weight:500;">北京时间 (UTC+8)</span>
+                            </div>
                             <span style="font-size:12px; background:#eff6ff; color:#1d4ed8; padding:2px 8px; border-radius:4px; border:1px solid #dbeafe;">
                                 {f'包含 {len(files)} 个文件' if len(files) > 1 else '单文件结果'}
                             </span>

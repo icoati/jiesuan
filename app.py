@@ -17,6 +17,22 @@ import io
 import re
 import time
 import datetime
+
+# 强制统一为中国北京时间 (Asia/Shanghai, UTC+8)
+# 在 Linux / VPS 上自动同步系统时区，彻底消除 VPS 默认为 UTC 导致的时间慢 8 小时问题
+if hasattr(time, 'tzset'):
+    try:
+        os.environ['TZ'] = 'Asia/Shanghai'
+        time.tzset()
+    except Exception:
+        pass
+
+BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+def get_beijing_now() -> datetime.datetime:
+    """获取标准的中国北京时间 (UTC+8)"""
+    return datetime.datetime.now(BEIJING_TZ)
+
 import hashlib
 import shutil
 import zipfile
@@ -142,7 +158,7 @@ render_html("""
         letter-spacing: -0.2px !important;
     }
 
-    /* ================= 专属登录门禁卡片 (高对比清晰呈现) ================= */
+/* ================= 专属登录门禁卡片 (高对比清晰呈现) ================= */
     div[data-testid="stForm"] {
         background: #f8fafc !important;
         border: 1px solid #e2e8f0 !important;
@@ -216,7 +232,7 @@ render_html("""
         overflow: hidden !important;
     }
 
-    /* 1. 外层输入框容器：统一橙色高光边框 */
+        /* 1. 外层输入框容器：统一橙色高光边框 */
     div[data-testid="stForm"] [data-testid="stTextInput"] > div[data-baseweb="input"] {
         border: 2px solid #ea580c !important;
         border-radius: 12px !important;
@@ -283,7 +299,7 @@ render_html("""
         font-weight: 700 !important;
     }
 
-    /* 7天免密复选框 */
+/* 7天免密复选框 */
     div[data-testid="stForm"] [data-testid="stCheckbox"] {
         text-align: left !important;
         margin: 12px 0 16px 2px !important;
@@ -299,7 +315,7 @@ render_html("""
         }
     }
 
-    /* ================= 现代高质感工作台顶栏 (Apple / B2B Precision) ================= */
+        /* ================= 现代高质感工作台顶栏 (Apple / B2B Precision) ================= */
     /* ================= 现代高质感工作台顶栏 (Apple / B2B Precision) ================= */
     .ios-hero-banner {
         background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
@@ -897,16 +913,27 @@ def verify_auth_token(expiry_ts: int, token: str) -> bool:
 
 
 # -------------------------------------------------------------
-# 智能环境判断：本地端默认直接免密直达，云端 VPS 保持安全门禁
+# 访问门禁控制与会话验证
 # -------------------------------------------------------------
-IS_LOCAL = (
-    os.getenv("LOCAL_MODE", "").lower() in ["1", "true", "yes"] or
+# 若 URL 包含 logout 参数，立即清空会话与 LocalStorage
+if st.query_params.get("logout", None):
+    st.session_state["authenticated"] = False
+    st.query_params.clear()
+    components.html("""
+    <script>
+    try {
+        localStorage.removeItem("medical_settlement_auth");
+    } catch(e) {}
+    </script>
+    """, height=0, width=0)
+
+SKIP_AUTH = (
     os.getenv("SKIP_AUTH", "").lower() in ["1", "true", "yes"] or
     os.getenv("SYSTEM_PASSWORD", "").lower() in ["none", "off", "0"]
 )
 
 if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = IS_LOCAL
+    st.session_state["authenticated"] = SKIP_AUTH
 
 # 1. 检查 URL 中是否携带了合法的 7 天免密 Token
 url_token = st.query_params.get("auth_token", None)
@@ -1059,7 +1086,7 @@ with st.sidebar:
     st.sidebar.markdown("---")
     st.sidebar.markdown("##### 系统环境状态")
     render_html(f'<span class="ios-badge-success">Python {sys.version.split()[0]} 原生全栈引擎</span>', container=st.sidebar)
-    render_html(f'<span class="ios-badge-success">{"本地极速直达 (免密运行)" if IS_LOCAL else "云端安全防护 (7天免密)"}</span>', container=st.sidebar)
+    render_html('<span class="ios-badge-success">安全访问防护 (7天免密)</span>', container=st.sidebar)
     render_html('<span class="ios-badge-success">7大业务模块就绪</span>', container=st.sidebar)
 
 
@@ -1961,7 +1988,7 @@ elif current_module == MODULE_JUMEI:
                             f.write(c_obj.getvalue())
                         c_paths.append(c_p)
 
-                    today_str = datetime.datetime.now().strftime("%Y%m%d")
+                    today_str = get_beijing_now().strftime("%Y%m%d")
 
                     script_path = os.path.join(ROOT_DIR, "陈菊梅基金会-雷允上结算包", "generate_settlement.py")
                     st.write("2. 正在执行多项目独立拆分(6/7/8...)、全数据驱动单价动态提取、开户行智能清洗与劳务个税核销...")
@@ -2599,13 +2626,15 @@ elif current_module == MODULE_BEIJIAN:
     </div>
     """)
 
-    # 开始生成大按钮（与侧边栏标题 100% 一致）
+    # 开始生成大按钮（与其它板块完全一致采用居中标准宽度）
     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    btn_start_beijian = st.button(
-        f"开始生成：{MODULE_BEIJIAN}",
-        type="primary",
-        use_container_width=True
-    )
+    _, col_btn, _ = st.columns([1, 1.8, 1])
+    with col_btn:
+        btn_start_beijian = st.button(
+            f"开始生成：{MODULE_BEIJIAN}",
+            type="primary",
+            use_container_width=True
+        )
 
     if btn_start_beijian:
         if not file_1_obj or not file_2_obj or not file_3_obj:
