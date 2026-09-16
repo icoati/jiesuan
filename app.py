@@ -43,6 +43,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import history_manager
+import bank_cleaner
 
 # 项目根目录
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -865,6 +866,19 @@ SVG_KOPU_VIDEO = """
 </svg>
 """
 
+SVG_BANK_CLEAN = """
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="3" y1="21" x2="21" y2="21"/>
+    <line x1="3" y1="10" x2="21" y2="10"/>
+    <polyline points="5 6 12 3 19 6"/>
+    <line x1="4" y1="10" x2="4" y2="21"/>
+    <line x1="20" y1="10" x2="20" y2="21"/>
+    <line x1="8" y1="14" x2="8" y2="17"/>
+    <line x1="12" y1="14" x2="12" y2="17"/>
+    <line x1="16" y1="14" x2="16" y2="17"/>
+</svg>
+"""
+
 
 
 # -------------------------------------------------------------
@@ -1035,6 +1049,7 @@ MODULE_JUMEI = "陈菊梅基金会-雷允上结算包"
 MODULE_SAAS = "老Saas医院导入模板"
 MODULE_BEIJIAN = "北检&康恩贝结算表"
 MODULE_KOPU = "北检&华东科普视频电签表"
+MODULE_BANK_CLEAN = "HCP开户行清洗与质检"
 
 MODULE_OPTIONS = [
     MODULE_SHANGYAO,
@@ -1043,7 +1058,8 @@ MODULE_OPTIONS = [
     MODULE_JUMEI,
     MODULE_SAAS,
     MODULE_BEIJIAN,
-    MODULE_KOPU
+    MODULE_KOPU,
+    MODULE_BANK_CLEAN
 ]
 
 @st.cache_resource(show_spinner="正在载入全国 49.4 万医院等级知识库与检索引擎...")
@@ -1087,7 +1103,7 @@ with st.sidebar:
     st.sidebar.markdown("##### 系统环境状态")
     render_html(f'<span class="ios-badge-success">Python {sys.version.split()[0]} 原生全栈引擎</span>', container=st.sidebar)
     render_html('<span class="ios-badge-success">安全访问防护 (7天免密)</span>', container=st.sidebar)
-    render_html('<span class="ios-badge-success">7大业务模块就绪</span>', container=st.sidebar)
+    render_html('<span class="ios-badge-success">8大业务模块就绪</span>', container=st.sidebar)
 
 
 current_module = st.session_state["current_module"]
@@ -3010,3 +3026,197 @@ elif current_module == MODULE_KOPU:
                         shutil.rmtree(temp_dir)
                     except Exception:
                         pass
+
+
+# =============================================================
+# 模块八：HCP开户行清洗与质检
+# =============================================================
+elif current_module == MODULE_BANK_CLEAN:
+    render_html(f"""
+    <div class="ios-hero-banner">
+        <div class="ios-hero-left">
+            <div class="ios-hero-icon-badge" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.4);">
+                {SVG_BANK_CLEAN}
+            </div>
+            <div>
+                <div class="ios-hero-title">{MODULE_BANK_CLEAN}</div>
+                <div class="ios-hero-subtitle">专治医生手填开户行疑难杂症：剔除重复银行名称、BIN码卡号自动补齐总行、网点层级质检预警与退票拦截。</div>
+            </div>
+        </div>
+        <div class="ios-hero-pill">
+            <span class="ios-hero-pill-dot" style="background:#10b981;"></span>
+            金融级质检引擎
+        </div>
+    </div>
+    """)
+
+    # 历史归档抽屉
+    history_manager.render_history_ui(MODULE_BANK_CLEAN)
+
+    mode_tab1, mode_tab2 = st.tabs(["📁 批量 Excel 表格清洗质检", "⚡ 单条开户行快速诊断测试"])
+
+    with mode_tab2:
+        st.markdown("##### ⚡ 单条开户行手填快速测试")
+        st.caption("输入医生填写的开户行文本与银行卡号，即时查看清洗效果与质检结论：")
+        col_t1, col_t2, col_t3 = st.columns([2, 1.5, 1])
+        with col_t1:
+            t_bank = st.text_input("手填开户行内容", value="中国建设银行建设银行太原住房支行", key="test_raw_bank")
+        with col_t2:
+            t_card = st.text_input("银行卡号 (可选，提供可自动识别银行)", value="6227001234567890", key="test_raw_card")
+        with col_t3:
+            t_name = st.text_input("医生姓名 (可选，防误填)", value="李医生", key="test_raw_name")
+
+        if st.button("🔍 立即诊断清洗", type="primary", key="btn_test_single"):
+            res = bank_cleaner.clean_single_bank_record(t_bank, t_card, t_name)
+            st.markdown("---")
+            c_r1, c_r2, c_r3 = st.columns(3)
+            with c_r1:
+                st.markdown("**原始填写**")
+                st.code(res["raw_bank"] or "(空)", language="text")
+            with c_r2:
+                st.markdown("**清洗后规范全称**")
+                st.code(res["cleaned_bank"] or "(空)", language="text")
+            with c_r3:
+                st.markdown("**质检结论**")
+                st.markdown(f"状态：**{res['status']}**\n\n说明：`{res['detail']}`")
+            if res["repair_note"]:
+                st.info(f"💡 自动修复动作：{res['repair_note']}")
+
+    with mode_tab1:
+        st.markdown("##### 📁 上传包含医生银行信息的 Excel 表格")
+        st.caption("支持从各大问卷、CRM 或 Saas 平台直接导出的 Excel 文件，自动识别并多维度清洗质检。")
+
+        uploaded_file = st.file_uploader(
+            "拖拽或点击上传待清洗表格 (.xlsx 或 .xls)",
+            type=["xlsx", "xls"],
+            key="bank_clean_uploader"
+        )
+
+        if uploaded_file is not None:
+            try:
+                # 读取全部工作表
+                xl_file = pd.ExcelFile(uploaded_file)
+                sheet_names = xl_file.sheet_names
+                
+                selected_sheet = sheet_names[0]
+                if len(sheet_names) > 1:
+                    selected_sheet = st.selectbox("请选择要清洗的工作表 (Sheet)：", sheet_names, key="bank_clean_sheet_select")
+
+                df_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+                st.success(f"已成功加载表格《{uploaded_file.name}》，工作表【{selected_sheet}】，共 {len(df_raw)} 行数据。")
+
+                # 智能识别列名
+                cols = list(df_raw.columns)
+                default_bank_col = next((c for c in cols if any(k in str(c) for k in ["开户行", "开户支行", "支行", "银行名称", "结算银行"])), cols[0])
+                default_card_col = next((c for c in cols if any(k in str(c) for k in ["银行卡", "卡号", "账号", "电签银行卡号"])), None)
+                default_name_col = next((c for c in cols if any(k in str(c) for k in ["医生", "专家", "姓名", "持卡人"])), None)
+
+                # 列选择映射区
+                st.markdown("###### 🎯 确认或指定列名映射：")
+                col_sel1, col_sel2, col_sel3 = st.columns(3)
+                with col_sel1:
+                    bank_col_name = st.selectbox("1. 开户行所在列 (*必选)", cols, index=cols.index(default_bank_col) if default_bank_col in cols else 0)
+                with col_sel2:
+                    card_col_options = ["(无卡号列)"] + cols
+                    card_col_idx = (cols.index(default_card_col) + 1) if default_card_col in cols else 0
+                    card_col_choice = st.selectbox("2. 银行卡号列 (强烈推荐，可自动补齐总行与冲突校验)", card_col_options, index=card_col_idx)
+                    card_col_name = None if card_col_choice == "(无卡号列)" else card_col_choice
+                with col_sel3:
+                    name_col_options = ["(无姓名列)"] + cols
+                    name_col_idx = (cols.index(default_name_col) + 1) if default_name_col in cols else 0
+                    name_col_choice = st.selectbox("3. 医生姓名列 (可选，防止误填本人姓名)", name_col_options, index=name_col_idx)
+                    name_col_name = None if name_col_choice == "(无姓名列)" else name_col_choice
+
+                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+                btn_start_clean = st.button("🚀 立即开始一键清洗与全量质检", type="primary", use_container_width=True, key="btn_exec_bank_clean")
+
+                if btn_start_clean:
+                    with st.status("正在启动金融级银行开户行清洗引擎...", expanded=True) as status_box:
+                        st.write("1. 正在扫描全表，剔除重复字样、修补末尾漏字、清理异常前缀...")
+                        df_cleaned, stats = bank_cleaner.clean_dataframe_banks(
+                            df_raw,
+                            bank_col=bank_col_name,
+                            card_col=card_col_name,
+                            name_col=name_col_name
+                        )
+
+                        st.write("2. 正在执行卡号 BIN 码反查总行、层级完整性审计与冲突检测...")
+                        temp_dir = tempfile.mkdtemp(prefix="bank_clean_")
+                        clean_filename = f"清洗完成_{uploaded_file.name.replace('.xls', '.xlsx')}"
+                        out_path = os.path.join(temp_dir, clean_filename)
+
+                        st.write("3. 正在生成带浅红异常高亮与防科学计数法保护的标准化报表...")
+                        bank_cleaner.export_styled_excel(df_cleaned, out_path)
+
+                        with open(out_path, "rb") as ef:
+                            out_bytes = ef.read()
+
+                        # 自动归档至历史记录
+                        summary_text = f"共清洗 {stats['total']} 条 · 达标 {stats['normal']} 条 · 自动修复 {stats['repaired']} 条 · 异常预警 {stats['warning'] + stats['error']} 条"
+                        history_manager.save_run(MODULE_BANK_CLEAN, {clean_filename: out_bytes}, summary=summary_text)
+
+                        status_box.update(label="清洗与质检完成！", state="complete")
+
+                    st.balloons()
+                    st.success(f"🎉 批量清洗处理完毕！共处理 **{stats['total']}** 条数据，自动修复 **{stats['repaired']}** 条，发现 **{stats['warning'] + stats['error']}** 条需关注异常。")
+
+                    # 核心指标 Bento 卡片
+                    st.markdown("##### 📊 本次数据清洗与质检大盘")
+                    m1, m2, m3, m4 = st.columns(4)
+                    with m1:
+                        st.metric("处理总条数", f"{stats['total']} 条")
+                    with m2:
+                        st.metric("格式达标行数", f"{stats['normal']} 条", delta="可直接汇款")
+                    with m3:
+                        st.metric("自动修复去重/补齐", f"{stats['repaired']} 条", delta="智能纠正", delta_color="normal")
+                    with m4:
+                        warn_count = stats['warning'] + stats['error']
+                        st.metric("待核查异常条数", f"{warn_count} 条", delta="建议人工核对" if warn_count > 0 else "零异常", delta_color="inverse" if warn_count > 0 else "normal")
+
+                    # 下载专区
+                    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+                    _, col_dl, _ = st.columns([1, 2, 1])
+                    with col_dl:
+                        st.download_button(
+                            label=f"⬇️ 一键下载清洗质检总表 (Excel - {format_size(len(out_bytes))})",
+                            data=out_bytes,
+                            file_name=clean_filename,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            type="primary",
+                            use_container_width=True
+                        )
+
+                    # 结果分类 Tab 预览
+                    st.markdown("##### 📑 清洗结果分类预览")
+                    tab_warn, tab_repaired, tab_all = st.tabs([
+                        f"⚠️ 待人工关注异常名单 ({warn_count})",
+                        f"🔄 自动修复对照表 ({stats['repaired']})",
+                        f"📋 全部数据明细 ({stats['total']})"
+                    ])
+
+                    with tab_warn:
+                        df_warn = df_cleaned[df_cleaned["【开户行质检状态】"].str.contains("⚠️|❌", na=False)]
+                        if len(df_warn) > 0:
+                            st.warning(f"以下 {len(df_warn)} 条记录存在缺少支行网点、缺少总行或卡号冲突，请重点核对后再行打款：")
+                            st.dataframe(df_warn, use_container_width=True)
+                        else:
+                            st.success("太棒了！本批次所有数据全部符合银行打款标准，未发现任何异常网点！")
+
+                    with tab_repaired:
+                        df_rep = df_cleaned[df_cleaned["【质检核验说明】"].str.contains("修复|剔除|补齐|去除", na=False)]
+                        if len(df_rep) > 0:
+                            st.info(f"以下 {len(df_rep)} 条记录系统已自动完成重复字剔除或卡号总行补齐：")
+                            # 展示对比列
+                            disp_cols = [c for c in [name_col_name, bank_col_name, "【清洗后】开户行规范全称", "【质检核验说明】"] if c]
+                            st.dataframe(df_rep[disp_cols], use_container_width=True)
+                        else:
+                            st.info("本批次原始数据无需纠正重复或补全总行。")
+
+                    with tab_all:
+                        st.caption("展示全部清洗质检后数据（前 100 行）：")
+                        st.dataframe(df_cleaned.head(100), use_container_width=True)
+
+            except Exception as ex:
+                st.error(f"读取或处理 Excel 表格失败: {str(ex)}")
+                import traceback
+                st.code(traceback.format_exc())
