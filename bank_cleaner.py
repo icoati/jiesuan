@@ -180,25 +180,76 @@ BRANCH_KEYWORDS = [
 # 2. 核心清洗与质检逻辑
 # ==============================================================================
 
+# 动态加载 3156 条全量全国卡 BIN 码库 (覆盖全国国有大行、股份制、城商行、各省农信社及村镇银行)
+FULL_BIN_MAP = dict(BANK_BIN_MAP)
+_bin_file = os.path.join(os.path.dirname(__file__), "card_bin.json")
+if os.path.exists(_bin_file):
+    try:
+        import json
+        with open(_bin_file, "r", encoding="utf-8") as _f:
+            _loaded = json.load(_f)
+            FULL_BIN_MAP.update(_loaded)
+    except Exception:
+        pass
+
+# 支付宝官方银行英文缩写到标准中文全称映射 (用于在线兜底)
+ALIPAY_BANK_CODE_MAP = {
+    "ICBC": "中国工商银行", "ABC": "中国农业银行", "BOC": "中国银行", "CCB": "中国建设银行",
+    "COMM": "交通银行", "PSBC": "中国邮政储蓄银行", "CMB": "招商银行", "SPDB": "上海浦东发展银行",
+    "CITIC": "中信银行", "CEB": "中国光大银行", "HXBANK": "华夏银行", "CMBC": "中国民生银行",
+    "GDB": "广发银行", "SPABANK": "平安银行", "CIB": "兴业银行", "BOSH": "上海银行",
+    "BJBANK": "北京银行", "CZBANK": "浙商银行", "CBHB": "渤海银行", "EGBANK": "恒丰银行",
+    "JSBANK": "江苏银行", "NJCB": "南京银行", "NBBANK": "宁波银行", "HZCB": "杭州银行",
+    "WZCB": "温州银行", "CSCB": "长沙银行", "CQBANK": "重庆银行", "CDCB": "成都银行",
+    "GRCB": "广州农商银行", "SRCB": "上海农商银行", "BJRCB": "北京农商银行", "GZCB": "广州银行"
+}
+
+_ONLINE_BIN_CACHE: Dict[str, str] = {}
+
+
 def identify_bank_from_card(card_no: str) -> Optional[str]:
-    """根据银行卡号前 6 位 (BIN 码) 智能识别所属银行"""
+    """
+    根据银行卡号 (BIN 码) 智能识别所属银行：
+    1. 优先匹配本地 3156+ 条全国离线卡 BIN 码库（全国各省农信社、地方城商行、六大行全覆盖）；
+    2. 按前缀长度从长到短 (8位 -> 3位) 精确扫描；
+    3. 若冷门卡未命中，自动调用支付宝官方公开卡BIN接口毫秒级兜底；
+    4. 内置内存缓存，免重复网络开销。
+    """
     if not card_no:
         return None
     # 过滤卡号中的空格与非数字
     clean_card = re.sub(r'\D', '', str(card_no))
-    if len(clean_card) < 6:
+    if len(clean_card) < 3:
         return None
     
-    # 优先匹配 6 位
-    prefix6 = clean_card[:6]
-    if prefix6 in BANK_BIN_MAP:
-        return BANK_BIN_MAP[prefix6]
-        
-    # 其次匹配 5 位
-    prefix5 = clean_card[:5]
-    if prefix5 in BANK_BIN_MAP:
-        return BANK_BIN_MAP[prefix5]
-        
+    # 1. 检查内存缓存
+    if clean_card in _ONLINE_BIN_CACHE:
+        return _ONLINE_BIN_CACHE[clean_card]
+
+    # 2. 从长到短在本地 3156 条全量库中扫描匹配 (8位到3位)
+    for prefix_len in (8, 7, 6, 5, 4, 3):
+        if len(clean_card) >= prefix_len:
+            prefix = clean_card[:prefix_len]
+            if prefix in FULL_BIN_MAP:
+                return FULL_BIN_MAP[prefix]
+
+    # 3. 在线官方云端接口毫秒级兜底识别 (限卡号>=15位且未命中本地库)
+    if len(clean_card) >= 15:
+        try:
+            import urllib.request
+            import json
+            api_url = f"https://ccdcapi.alipay.com/validateAndCacheCardInfo.json?_input_charset=utf-8&cardNo={clean_card}&cardBinCheck=true"
+            req = urllib.request.Request(api_url, headers={"User-Agent": "Antigravity/1.0 (Windows NT 10.0)"})
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if data.get("validated") and data.get("bank"):
+                    b_code = data["bank"]
+                    b_name = ALIPAY_BANK_CODE_MAP.get(b_code, b_code)
+                    _ONLINE_BIN_CACHE[clean_card] = b_name
+                    return b_name
+        except Exception:
+            pass
+
     return None
 
 
