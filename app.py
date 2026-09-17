@@ -3102,17 +3102,32 @@ elif current_module == MODULE_BANK_CLEAN:
                 if len(sheet_names) > 1:
                     selected_sheet = st.selectbox("请选择要清洗的工作表 (Sheet)：", sheet_names, key="bank_clean_sheet_select")
 
-                df_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
-                st.success(f"已成功加载表格《{uploaded_file.name}》，工作表【{selected_sheet}】，共 {len(df_raw)} 行数据。")
+                df_raw_initial = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+                
+                # 智能识别表头行（自动跳过大标题、合并单元格）与相关文字动态列名抓取
+                df_parsed, detected_map = bank_cleaner.auto_detect_table_structure(df_raw_initial)
+                header_line = detected_map.get('header_row', 1)
+                
+                if header_line > 1:
+                    st.success(f"已成功加载表格《{uploaded_file.name}》，工作表【{selected_sheet}】。✨ **智能定位**：已自动跳过顶部大标题，锁定第 **{header_line}** 行为真实表头，共 **{len(df_parsed)}** 行明细数据。")
+                else:
+                    st.success(f"已成功加载表格《{uploaded_file.name}》，工作表【{selected_sheet}】，共 **{len(df_parsed)}** 行明细数据。")
 
-                # 智能识别列名
-                cols = list(df_raw.columns)
-                default_bank_col = next((c for c in cols if any(k in str(c) for k in ["开户行", "开户支行", "支行", "银行名称", "结算银行", "网点"])), cols[0])
-                default_card_col = next((c for c in cols if any(k in str(c) for k in ["银行卡", "卡号", "账号", "结算账号", "借记卡", "收款账号", "收款卡号", "电签银行卡号"])), None)
-                default_name_col = next((c for c in cols if any(k in str(c) for k in ["医生", "专家", "姓名", "持卡人", "收款人"])), None)
+                # 可用列名列表
+                cols = list(df_parsed.columns)
+                default_bank_col = detected_map.get('bank_col') or next((c for c in cols if any(k in str(c) for k in ["开户行", "开户支行", "支行", "银行名称", "结算银行", "网点"])), cols[0])
+                default_card_col = detected_map.get('card_col') or next((c for c in cols if any(k in str(c) for k in ["银行卡", "卡号", "账号", "结算账号", "借记卡", "收款账号", "收款卡号", "电签银行卡号"])), None)
+                default_name_col = detected_map.get('name_col') or next((c for c in cols if any(k in str(c) for k in ["医生", "专家", "姓名", "持卡人", "收款人"])), None)
 
                 # 列选择映射区
-                st.markdown("###### 🎯 确认或指定列名映射：")
+                st.markdown("###### 🎯 自动抓取与指定列名映射（支持不固定列名/相关文字识别）：")
+                badge_text = f"💡 **系统自动匹配**：开户行列【`{default_bank_col}`】"
+                if default_card_col:
+                    badge_text += f" | 银行卡号列【`{default_card_col}`】"
+                if default_name_col:
+                    badge_text += f" | 姓名列【`{default_name_col}`】"
+                st.info(badge_text)
+
                 col_sel1, col_sel2, col_sel3 = st.columns(3)
                 with col_sel1:
                     bank_col_name = st.selectbox("1. 开户行所在列 (*必选)", cols, index=cols.index(default_bank_col) if default_bank_col in cols else 0)
@@ -3144,7 +3159,7 @@ elif current_module == MODULE_BANK_CLEAN:
                     with st.status("正在启动金融级银行开户行清洗引擎...", expanded=True) as status_box:
                         st.write("1. 正在扫描全表，剔除重复字样、规范化银行简写、修补末尾漏字...")
                         df_cleaned, stats = bank_cleaner.clean_dataframe_banks(
-                            df_raw,
+                            df_parsed,
                             bank_col=bank_col_name,
                             card_col=card_col_name,
                             name_col=name_col_name,

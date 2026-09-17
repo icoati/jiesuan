@@ -238,29 +238,53 @@ def advanced_dedup_and_clean_bank(text: str) -> Tuple[str, List[str]]:
             s = re.sub(pat, r'\1', s)
             actions.append(f'剔除简称[{short_n}]')
 
-    # 6. 开头简写规范化升级（例如“建行太原住房支行” -> “中国建设银行太原住房支行”）
+    # 6. 开头简写规范化升级（例如“建行太原住房支行” -> “中国建设银行太原住房支行”，“建设银行太原康乐街支行” -> “中国建设银行太原康乐街支行”）
     prefix_standardize = [
+        (r'^(?:中国)?建设银行', '中国建设银行'),
+        (r'^(?:中国)?工商银行', '中国工商银行'),
+        (r'^(?:中国)?农业银行', '中国农业银行'),
+        (r'^(?:中国)?邮政储蓄银行?', '中国邮政储蓄银行'),
+        (r'^(?:中国)?民生银行?', '中国民生银行'),
+        (r'^(?:中国)?光大银行?', '中国光大银行'),
+        (r'^(?:上海)?浦东发展银行?', '上海浦东发展银行'),
         (r'^建行', '中国建设银行'),
         (r'^工行', '中国工商银行'),
         (r'^农行', '中国农业银行'),
         (r'^中行', '中国银行'),
         (r'^交行', '交通银行'),
         (r'^邮储银行?', '中国邮政储蓄银行'),
+        (r'^邮储', '中国邮政储蓄银行'),
+        (r'^邮政银行', '中国邮政储蓄银行'),
         (r'^招行', '招商银行'),
-        (r'^民生银行?', '中国民生银行'),
-        (r'^光大银行?', '中国光大银行'),
+        (r'^民生', '中国民生银行'),
+        (r'^光大', '中国光大银行'),
         (r'^浦发银行?', '上海浦东发展银行'),
+        (r'^浦发', '上海浦东发展银行'),
         (r'^广发银行?', '广发银行'),
         (r'^平安银行?', '平安银行'),
         (r'^兴业银行?', '兴业银行')
     ]
     for pat, std_name in prefix_standardize:
         if re.search(pat, s) and not s.startswith(std_name):
-            s = re.sub(pat, std_name, s)
-            actions.append(f'简称升级为标准全称[{std_name}]')
+            s = re.sub(pat, std_name, s, count=1)
+            actions.append(f'规范总行前缀[{std_name}]')
             break
 
-    # 7. 末尾漏字修补
+    # 7. 跨地域/跨词重复总行清理（例如“中国农业银行长治市农业银行永泰支行”中跨市县重复出现的“农业银行”）
+    for std_bank, aliases in KNOWN_BANK_KEYWORDS:
+        if s.startswith(std_bank):
+            rest = s[len(std_bank):]
+            check_words = [std_bank.replace('中国', ''), std_bank] + aliases
+            for w in sorted(check_words, key=len, reverse=True):
+                if len(w) >= 2 and w in rest:
+                    # 剔除支行部分冗余复现的总行名
+                    rest_cleaned = rest.replace(w, '', 1)
+                    s = std_bank + rest_cleaned
+                    actions.append(f'剔除跨词重复总行[{w}]')
+                    break
+            break
+
+    # 8. 末尾漏字修补
     if s.endswith('支') and not s.endswith('分支') and not s.endswith('支行'):
         s += '行'
         actions.append('补齐末尾[行]字')
@@ -268,12 +292,104 @@ def advanced_dedup_and_clean_bank(text: str) -> Tuple[str, List[str]]:
         s += '行'
         actions.append('补齐末尾[行]字')
 
-    # 8. 连续叠字清理
+    # 9. 连续叠字清理
     s = re.sub(r'支行支行', '支行', s)
     s = re.sub(r'分行分行', '分行', s)
     s = re.sub(r'信用社信用社', '信用社', s)
 
     return s.strip(), actions
+
+
+def auto_detect_table_structure(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Optional[str]], int]:
+    """
+    智能解析金融结算表格结构：
+    1. 自动探测真正表头行（自动跳过报告大标题、合并单元格、顶部空行）
+    2. 依据相关文字关键词与列内容特征，动态精准定位：
+       - 开户行列 (模糊匹配：开户行/开户支行/银行名称/开户银行/结算银行/支行名称/网点...)
+       - 银行卡号列 (模糊匹配：银行卡号/卡号/结算账号/借记卡号/收款账号... + 15-20位卡号内容特征识别)
+       - 姓名列 (模糊匹配：姓名/医生姓名/专家姓名/持卡人/收款人/户名...)
+    返回: (规范后的DataFrame, 映射字典, 识别到的表头行索引)
+    """
+    bank_kws = ['开户行', '开户支行', '银行名称', '开户银行', '支行名称', '所属银行', '结算银行', '收款银行', '银行及支行', '开户网点', '支行', '银行']
+    card_kws = ['银行卡号', '银行卡', '卡号', '收款卡号', '结算卡号', '结算账号', '银行账号', '收款账号', '借记卡号', '借记卡', '账号', '电签卡号', '电签银行卡号']
+    name_kws = ['姓名', '专家姓名', '医生姓名', '持卡人', '收款人', '专家', '医生', '收款人姓名', '户名']
+    all_kws = bank_kws + card_kws + name_kws + ['序号', '身份证', '身份证号', '手机号', '电话', '金额', '劳务费', '医院', '职称', '税后']
+
+    # 评估当前 columns 是否直接就是有效表头
+    curr_score = sum(1 for c in df_raw.columns if any(k in str(c) for k in all_kws))
+    has_unnamed = any('Unnamed' in str(c) for c in df_raw.columns)
+    
+    best_row_idx = -1  # -1 表示现有的 columns 就是表头
+    best_score = curr_score if not has_unnamed else 0
+    
+    # 扫描前 10 行探测表头
+    for r in range(min(10, len(df_raw))):
+        row_vals = [str(x).strip() for x in df_raw.iloc[r] if pd.notna(x)]
+        score = sum(1 for v in row_vals if any(k in v for k in all_kws))
+        if score > best_score:
+            best_score = score
+            best_row_idx = r
+            
+    if best_row_idx >= 0:
+        raw_row_cols = [str(x).strip() for x in df_raw.iloc[best_row_idx]]
+        df_data = df_raw.iloc[best_row_idx+1:].copy().reset_index(drop=True)
+        # 排除之前误操作遗留的空列名或重复列名
+        seen_cols = {}
+        unique_cols = []
+        for c in raw_row_cols:
+            c_str = str(c).strip()
+            if not c_str or c_str.startswith('Unnamed:'):
+                unique_cols.append(c_str)
+                continue
+            if c_str in seen_cols:
+                seen_cols[c_str] += 1
+                unique_cols.append(f"{c_str}_{seen_cols[c_str]}")
+            else:
+                seen_cols[c_str] = 0
+                unique_cols.append(c_str)
+        df_data.columns = unique_cols
+        header_excel_line = best_row_idx + 2  # Excel 真实行号（从1起算，且第一行可能为原标题）
+    else:
+        df_data = df_raw.copy()
+        header_excel_line = 1
+
+    # 自动剥离若之前运行残留的质检追加列，防止重复追加
+    audit_cols_to_drop = [c for c in df_data.columns if any(k in str(c) for k in ['【清洗后】', '【开户行质检状态】', '【质检核验说明】', '【原始手填备份】', '【规范开户行】'])]
+    if audit_cols_to_drop:
+        df_data = df_data.drop(columns=audit_cols_to_drop, errors='ignore')
+
+    # 动态抓取列名（过滤纯空列与系统追加列）
+    cols = [str(c).strip() for c in df_data.columns if str(c).strip() and not str(c).startswith('Unnamed:') and not str(c).startswith('【')]
+    if not cols:
+        cols = list(df_data.columns)
+
+    # 1. 动态抓取开户行/银行列
+    bank_col = next((c for c in cols if any(k in str(c) for k in ['开户行', '开户支行', '开户银行', '银行名称', '结算银行', '收款银行', '所属银行', '支行名称', '网点名称', '开户网点'])), None)
+    if not bank_col:
+        bank_col = next((c for c in cols if any(k in str(c) for k in ['银行', '支行', '网点']) and not any(bad in str(c) for bad in ['卡号', '账号', '行号', '代码', '卡', '账'])), None)
+    if not bank_col:
+        # 数据内容特征扫描：包含支行/分行/营业室/信用社
+        for c in cols:
+            samples = [str(x) for x in df_data[c].dropna().head(10)]
+            if any('支行' in s or '银行' in s or '分行' in s or '营业' in s or '信用社' in s for s in samples):
+                bank_col = c
+                break
+
+    # 2. 动态抓取银行卡号列
+    card_col = next((c for c in cols if any(k in str(c) for k in ['银行卡号', '银行卡', '卡号', '收款卡号', '结算卡号', '借记卡号', '结算账号', '银行账号', '收款账号', '借记卡', '账号', '电签银行卡号']) and not any(bad in str(c) for bad in ['开户行', '支行', '行名'])), None)
+    if not card_col:
+        # 数据内容特征扫描：15-20位连续纯数字
+        for c in cols:
+            samples = [re.sub(r'[\s\.\-]', '', str(x)) for x in df_data[c].dropna().head(10)]
+            digit_cnt = sum(1 for s in samples if re.match(r'^\d{15,20}$', s))
+            if digit_cnt >= 2:
+                card_col = c
+                break
+
+    # 3. 动态抓取姓名列
+    name_col = next((c for c in cols if any(k in str(c) for k in ['姓名', '医生姓名', '专家姓名', '持卡人', '收款人', '户名', '收款人姓名', '专家', '医生']) and '卡' not in str(c)), None)
+
+    return df_data, {'bank_col': bank_col, 'card_col': card_col, 'name_col': name_col, 'header_row': header_excel_line}
 
 
 def clean_single_bank_record(
@@ -420,12 +536,39 @@ def clean_dataframe_banks(
         "error": 0
     }
 
+    # 第一轮：全量清洗与初步质检，并提取本批次已合规网点知识库
+    first_pass_results = []
+    valid_batch_branches = set()
+
     for idx, row in df_out.iterrows():
         raw_b = row.get(bank_col, "")
         card_v = row.get(card_col, "") if card_col else None
         name_v = row.get(name_col, "") if name_col else None
 
         res = clean_single_bank_record(raw_b, card_v, name_v)
+        first_pass_results.append(res)
+        if res["status"].startswith("✅"):
+            valid_batch_branches.add(res["cleaned_bank"])
+
+    # 第二轮：基于批次知识库与地名特征上下文，对漏写“支行”的记录二次智能对齐
+    for res in first_pass_results:
+        curr_b = res["cleaned_bank"]
+        if res["status"].startswith("⚠️") and "缺少网点" in res["status"]:
+            candidate_branch = curr_b + "支行"
+            # 1. 优先命中同批次已有的合规支行（如“中国银行太原杏花岭”命中同批的“中国银行太原杏花岭支行”）
+            if candidate_branch in valid_batch_branches:
+                res["cleaned_bank"] = candidate_branch
+                res["status"] = "✅ 正常"
+                res["detail"] = "已自动修复并格式达标"
+                res["repair_note"] += "补齐末尾[支行]字 (依据同批已合规网点对齐); "
+                res["is_repaired"] = True
+            # 2. 网点以行政区/街道/地名结尾（如杏花岭、建设路、迎泽），但漏写支行
+            elif re.search(r'(?:区|县|镇|街|路|道|岭|桥|门|城|园|巷|矿|湾|坪|港|河|洲|湖|岛|堡|铺|庄)$', curr_b):
+                res["cleaned_bank"] = candidate_branch
+                res["status"] = "✅ 正常"
+                res["detail"] = "已自动修复并格式达标"
+                res["repair_note"] += "补齐末尾[支行]字; "
+                res["is_repaired"] = True
 
         cleaned_banks.append(res["cleaned_bank"])
         statuses.append(res["status"])
@@ -508,14 +651,15 @@ def export_styled_excel(df: pd.DataFrame, output_path: str):
         cell.border = thin_border
     ws.row_dimensions[1].height = 28
 
-    status_col_idx = headers.index("【开户行质检状态】") + 1 if "【开户行质检状态】" in headers else None
+    status_col_pos = headers.index("【开户行质检状态】") if "【开户行质检状态】" in headers else None
 
-    for r_idx, row in df.iterrows():
+    for r_idx in range(len(df)):
         excel_row_num = r_idx + 2
-        status_val = str(row.get("【开户行质检状态】", ""))
+        status_val = str(df.iloc[r_idx, status_col_pos]) if status_col_pos is not None else ""
 
-        for c_idx, col_name in enumerate(headers, start=1):
-            val = row[col_name]
+        for c_idx in range(1, len(headers) + 1):
+            col_name = headers[c_idx - 1]
+            val = df.iloc[r_idx, c_idx - 1]
             if pd.isna(val):
                 val = ""
             
@@ -539,8 +683,8 @@ def export_styled_excel(df: pd.DataFrame, output_path: str):
             elif "❌" in status_val:
                 cell.fill = fill_err_row
 
-        if status_col_idx:
-            scell = ws.cell(row=excel_row_num, column=status_col_idx)
+        if status_col_pos is not None:
+            scell = ws.cell(row=excel_row_num, column=status_col_pos + 1)
             scell.alignment = Alignment(horizontal="center", vertical="center")
             if "✅" in status_val:
                 scell.font = font_status_ok
