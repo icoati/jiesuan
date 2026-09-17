@@ -3107,9 +3107,9 @@ elif current_module == MODULE_BANK_CLEAN:
 
                 # 智能识别列名
                 cols = list(df_raw.columns)
-                default_bank_col = next((c for c in cols if any(k in str(c) for k in ["开户行", "开户支行", "支行", "银行名称", "结算银行"])), cols[0])
-                default_card_col = next((c for c in cols if any(k in str(c) for k in ["银行卡", "卡号", "账号", "电签银行卡号"])), None)
-                default_name_col = next((c for c in cols if any(k in str(c) for k in ["医生", "专家", "姓名", "持卡人"])), None)
+                default_bank_col = next((c for c in cols if any(k in str(c) for k in ["开户行", "开户支行", "支行", "银行名称", "结算银行", "网点"])), cols[0])
+                default_card_col = next((c for c in cols if any(k in str(c) for k in ["银行卡", "卡号", "账号", "结算账号", "借记卡", "收款账号", "收款卡号", "电签银行卡号"])), None)
+                default_name_col = next((c for c in cols if any(k in str(c) for k in ["医生", "专家", "姓名", "持卡人", "收款人"])), None)
 
                 # 列选择映射区
                 st.markdown("###### 🎯 确认或指定列名映射：")
@@ -3119,7 +3119,7 @@ elif current_module == MODULE_BANK_CLEAN:
                 with col_sel2:
                     card_col_options = ["(无卡号列)"] + cols
                     card_col_idx = (cols.index(default_card_col) + 1) if default_card_col in cols else 0
-                    card_col_choice = st.selectbox("2. 银行卡号列 (强烈推荐，可自动补齐总行与冲突校验)", card_col_options, index=card_col_idx)
+                    card_col_choice = st.selectbox("2. 银行卡号列 (强烈建议选上，系统将根据3177+卡BIN库自动补齐总行)", card_col_options, index=card_col_idx)
                     card_col_name = None if card_col_choice == "(无卡号列)" else card_col_choice
                 with col_sel3:
                     name_col_options = ["(无姓名列)"] + cols
@@ -3127,22 +3127,35 @@ elif current_module == MODULE_BANK_CLEAN:
                     name_col_choice = st.selectbox("3. 医生姓名列 (可选，防止误填本人姓名)", name_col_options, index=name_col_idx)
                     name_col_name = None if name_col_choice == "(无姓名列)" else name_col_choice
 
+                # 回填选项
+                st.markdown("###### ⚙️ 规范后开户行写入方式：")
+                replace_mode = st.radio(
+                    "请选择生成方式：",
+                    ["【直接生效模式】原【开户行】列直接更新为规范全称，并在其右侧插入【原始手填备份】留档 (推荐，财务网银代发直接用)", "【仅末尾追加模式】原表格列完全不动，在最右侧追加【清洗后规范全称】等列"],
+                    index=0,
+                    horizontal=True
+                )
+                do_replace = replace_mode.startswith("【直接生效模式】")
+
                 st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
                 btn_start_clean = st.button("🚀 立即开始一键清洗与全量质检", type="primary", use_container_width=True, key="btn_exec_bank_clean")
 
                 if btn_start_clean:
                     with st.status("正在启动金融级银行开户行清洗引擎...", expanded=True) as status_box:
-                        st.write("1. 正在扫描全表，剔除重复字样、修补末尾漏字、清理异常前缀...")
+                        st.write("1. 正在扫描全表，剔除重复字样、规范化银行简写、修补末尾漏字...")
                         df_cleaned, stats = bank_cleaner.clean_dataframe_banks(
                             df_raw,
                             bank_col=bank_col_name,
                             card_col=card_col_name,
-                            name_col=name_col_name
+                            name_col=name_col_name,
+                            replace_original=do_replace
                         )
 
-                        st.write("2. 正在执行卡号 BIN 码反查总行、层级完整性审计与冲突检测...")
+                        st.write("2. 正在执行 3,177+ 银联卡 BIN 码反查总行、网点完整性审计与冲突检测...")
                         temp_dir = tempfile.mkdtemp(prefix="bank_clean_")
-                        clean_filename = f"清洗完成_{uploaded_file.name.replace('.xls', '.xlsx')}"
+                        # 彻底根治 .xlsxx 后缀 Bug：提取纯文件名并统一为标准 .xlsx
+                        stem_name = Path(uploaded_file.name).stem
+                        clean_filename = f"清洗完成_{stem_name}.xlsx"
                         out_path = os.path.join(temp_dir, clean_filename)
 
                         st.write("3. 正在生成带浅红异常高亮与防科学计数法保护的标准化报表...")
@@ -3178,7 +3191,7 @@ elif current_module == MODULE_BANK_CLEAN:
                     _, col_dl, _ = st.columns([1, 2, 1])
                     with col_dl:
                         st.download_button(
-                            label=f"⬇️ 一键下载清洗质检总表 (Excel - {format_size(len(out_bytes))})",
+                            label=f"⬇️ 一键下载【{clean_filename}】 ({format_size(len(out_bytes))})",
                             data=out_bytes,
                             file_name=clean_filename,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3188,27 +3201,38 @@ elif current_module == MODULE_BANK_CLEAN:
 
                     # 结果分类 Tab 预览
                     st.markdown("##### 📑 清洗结果分类预览")
-                    tab_warn, tab_repaired, tab_all = st.tabs([
+                    tab_compare, tab_warn, tab_repaired, tab_all = st.tabs([
+                        f"✨ 核心清洗对照 ({stats['total']})",
                         f"⚠️ 待人工关注异常名单 ({warn_count})",
                         f"🔄 自动修复对照表 ({stats['repaired']})",
-                        f"📋 全部数据明细 ({stats['total']})"
+                        f"📋 全部数据明细"
                     ])
+
+                    with tab_compare:
+                        st.info("💡 下表直观展示每一条开户行的【原始填写】 vs 【清洗后规范全称】对比：")
+                        if do_replace:
+                            preview_cols = [c for c in [name_col_name, "【原始手填备份】开户行", bank_col_name, "【开户行质检状态】", "【质检核验说明】"] if c in df_cleaned.columns]
+                        else:
+                            preview_cols = [c for c in [name_col_name, bank_col_name, "【清洗后】开户行规范全称", "【开户行质检状态】", "【质检核验说明】"] if c in df_cleaned.columns]
+                        st.dataframe(df_cleaned[preview_cols].head(50), use_container_width=True)
 
                     with tab_warn:
                         df_warn = df_cleaned[df_cleaned["【开户行质检状态】"].str.contains("⚠️|❌", na=False)]
                         if len(df_warn) > 0:
-                            st.warning(f"以下 {len(df_warn)} 条记录存在缺少支行网点、缺少总行或卡号冲突，请重点核对后再行打款：")
+                            st.warning(f"以下 {len(df_warn)} 条记录存在缺少支行网点、缺少总行或卡号冲突，建议核对后再行打款：")
                             st.dataframe(df_warn, use_container_width=True)
                         else:
                             st.success("太棒了！本批次所有数据全部符合银行打款标准，未发现任何异常网点！")
 
                     with tab_repaired:
-                        df_rep = df_cleaned[df_cleaned["【质检核验说明】"].str.contains("修复|剔除|补齐|去除", na=False)]
+                        df_rep = df_cleaned[df_cleaned["【质检核验说明】"].str.contains("修复|剔除|补齐|去除|升级", na=False)]
                         if len(df_rep) > 0:
-                            st.info(f"以下 {len(df_rep)} 条记录系统已自动完成重复字剔除或卡号总行补齐：")
-                            # 展示对比列
-                            disp_cols = [c for c in [name_col_name, bank_col_name, "【清洗后】开户行规范全称", "【质检核验说明】"] if c]
-                            st.dataframe(df_rep[disp_cols], use_container_width=True)
+                            st.info(f"以下 {len(df_rep)} 条记录系统已自动完成重复字剔除、简称升级或总行补齐：")
+                            if do_replace:
+                                rep_cols = [c for c in [name_col_name, "【原始手填备份】开户行", bank_col_name, "【质检核验说明】"] if c in df_cleaned.columns]
+                            else:
+                                rep_cols = [c for c in [name_col_name, bank_col_name, "【清洗后】开户行规范全称", "【质检核验说明】"] if c in df_cleaned.columns]
+                            st.dataframe(df_rep[rep_cols], use_container_width=True)
                         else:
                             st.info("本批次原始数据无需纠正重复或补全总行。")
 
