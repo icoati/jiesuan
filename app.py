@@ -3120,37 +3120,55 @@ elif current_module == MODULE_BANK_CLEAN:
                 default_name_col = detected_map.get('name_col') or next((c for c in cols if any(k in str(c) for k in ["医生", "专家", "姓名", "持卡人", "收款人"])), None)
 
                 # 列选择映射区
-                st.markdown("###### 🎯 自动抓取与指定列名映射（支持不固定列名/相关文字识别）：")
-                badge_text = f"💡 **系统自动匹配**：开户行列【`{default_bank_col}`】"
+                st.markdown("###### 🎯 确认列名映射（已自动智能抓取）：")
+                badge_text = f"💡 **系统自动匹配**：开户行【`{default_bank_col}`】"
                 if default_card_col:
-                    badge_text += f" | 银行卡号列【`{default_card_col}`】"
+                    badge_text += f"　|　银行卡号【`{default_card_col}`】"
                 if default_name_col:
-                    badge_text += f" | 姓名列【`{default_name_col}`】"
+                    badge_text += f"　|　医生姓名【`{default_name_col}`】"
                 st.info(badge_text)
 
                 col_sel1, col_sel2, col_sel3 = st.columns(3)
                 with col_sel1:
-                    bank_col_name = st.selectbox("1. 开户行所在列 (*必选)", cols, index=cols.index(default_bank_col) if default_bank_col in cols else 0)
+                    bank_col_name = st.selectbox(
+                        "1. 开户行所在列 (*必选)",
+                        cols,
+                        index=cols.index(default_bank_col) if default_bank_col in cols else 0,
+                        help="选择包含开户行、银行名称或支行信息的列"
+                    )
                 with col_sel2:
                     card_col_options = ["(无卡号列)"] + cols
                     card_col_idx = (cols.index(default_card_col) + 1) if default_card_col in cols else 0
-                    card_col_choice = st.selectbox("2. 银行卡号列 (强烈建议选上，系统将根据3177+卡BIN库自动补齐总行)", card_col_options, index=card_col_idx)
+                    card_col_choice = st.selectbox(
+                        "2. 银行卡号列 (*推荐)",
+                        card_col_options,
+                        index=card_col_idx,
+                        help="强烈建议选上：系统将根据 3177+ 银联卡 BIN 码库，在缺少总行时自动反查补全"
+                    )
                     card_col_name = None if card_col_choice == "(无卡号列)" else card_col_choice
                 with col_sel3:
                     name_col_options = ["(无姓名列)"] + cols
                     name_col_idx = (cols.index(default_name_col) + 1) if default_name_col in cols else 0
-                    name_col_choice = st.selectbox("3. 医生姓名列 (可选，防止误填本人姓名)", name_col_options, index=name_col_idx)
+                    name_col_choice = st.selectbox(
+                        "3. 医生姓名列 (可选)",
+                        name_col_options,
+                        index=name_col_idx,
+                        help="用于辅助质检核对，防止将医生本人姓名误填入开户行"
+                    )
                     name_col_name = None if name_col_choice == "(无姓名列)" else name_col_choice
 
                 # 回填选项
                 st.markdown("###### ⚙️ 规范后开户行写入方式：")
                 replace_mode = st.radio(
                     "请选择生成方式：",
-                    ["【直接生效模式】原【开户行】列直接更新为规范全称，并在其右侧插入【原始手填备份】留档 (推荐，财务网银代发直接用)", "【仅末尾追加模式】原表格列完全不动，在最右侧追加【清洗后规范全称】等列"],
+                    [
+                        "【直接覆盖模式】原【开户行】列更新为规范全称，并在其右侧插入【原始手填备份】留档 (推荐，财务网银代发直接用)",
+                        "【仅末尾追加模式】原表格列完全不动，在最右侧追加【清洗后规范全称】等列"
+                    ],
                     index=0,
                     horizontal=True
                 )
-                do_replace = replace_mode.startswith("【直接生效模式】")
+                do_replace = replace_mode.startswith("【直接覆盖模式】")
 
                 st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
                 btn_start_clean = st.button("🚀 立即开始一键清洗与全量质检", type="primary", use_container_width=True, key="btn_exec_bank_clean")
