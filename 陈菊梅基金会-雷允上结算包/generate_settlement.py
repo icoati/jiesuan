@@ -874,7 +874,7 @@ if __name__ == '__main__':
             settlement_month=args.month
         )
     else:
-        out_dir = args.out_dir or '.'
+        out_dir = args.out_dir or (os.path.dirname(args.out) if args.out else None) or '.'
         corpus_inputs = args.corpus
         if corpus_inputs is None:
             print('>>> 未显式指定参数，启动自适应检测处理模式...')
@@ -892,10 +892,15 @@ if __name__ == '__main__':
                     print('未在当前目录下找到有效输入文件。请指定 --doc 与 --corpus 参数。')
                     sys.exit(1)
                     
-        generate_all_settlements(
+        res = generate_all_settlements(
             doctor_source=args.doc,
             corpus_sources=corpus_inputs,
             output_dir=out_dir,
             settlement_date=args.date,
             settlement_month=args.month
         )
+        if args.out and res.get('projects'):
+            first_proj = next(iter(res['projects'].values()))
+            with open(args.out, 'wb') as f:
+                f.write(first_proj['excel_bytes'])
+            print(f"[OK] 兼容模式：已同步输出至目标文件 -> {args.out}")
