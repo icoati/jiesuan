@@ -370,7 +370,10 @@ render_html("""
     .ios-hero-icon-badge svg path,
     .ios-hero-icon-badge svg rect,
     .ios-hero-icon-badge svg line,
-    .ios-hero-icon-badge svg polyline {
+    .ios-hero-icon-badge svg polyline,
+    .ios-hero-icon-badge svg polygon,
+    .ios-hero-icon-badge svg circle,
+    .ios-hero-icon-badge svg ellipse {
         stroke: #0284c7 !important;
     }
     @media (prefers-color-scheme: dark) {
@@ -381,7 +384,10 @@ render_html("""
         .ios-hero-icon-badge svg path,
         .ios-hero-icon-badge svg rect,
         .ios-hero-icon-badge svg line,
-        .ios-hero-icon-badge svg polyline {
+        .ios-hero-icon-badge svg polyline,
+        .ios-hero-icon-badge svg polygon,
+        .ios-hero-icon-badge svg circle,
+        .ios-hero-icon-badge svg ellipse {
             stroke: #38bdf8 !important;
         }
     }
@@ -392,7 +398,10 @@ render_html("""
     [data-theme="dark"] .ios-hero-icon-badge svg path,
     [data-theme="dark"] .ios-hero-icon-badge svg rect,
     [data-theme="dark"] .ios-hero-icon-badge svg line,
-    [data-theme="dark"] .ios-hero-icon-badge svg polyline {
+    [data-theme="dark"] .ios-hero-icon-badge svg polyline,
+    [data-theme="dark"] .ios-hero-icon-badge svg polygon,
+    [data-theme="dark"] .ios-hero-icon-badge svg circle,
+    [data-theme="dark"] .ios-hero-icon-badge svg ellipse {
         stroke: #38bdf8 !important;
     }
 
@@ -859,7 +868,7 @@ SVG_BEIJIAN_SETTLE = """
 """
 
 SVG_KOPU_VIDEO = """
-<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <polygon points="23 7 16 12 23 17 23 7"/>
     <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
     <circle cx="8.5" cy="12" r="2.5"/>
@@ -867,10 +876,10 @@ SVG_KOPU_VIDEO = """
 """
 
 SVG_KOPU_DIANPING = """
-<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-    <path d="M12 7v6"/>
-    <path d="M9 10h6"/>
+    <path d="M9 9h6"/>
+    <path d="M9 13h4"/>
 </svg>
 """
 
@@ -2642,15 +2651,6 @@ elif current_module == MODULE_BEIJIAN:
             else:
                 render_html('<span class="ios-badge-pending">待识别：3. 语料库全量明细表 (3.xlsx)</span>', container=chk_cols[2])
 
-    render_html("""
-    <div style="margin: 12px 0 16px 0; padding: 12px 18px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 13px; color: #166534; display: flex; align-items: center; justify-content: space-between;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-            <span><b>自动智能核算</b>：系统将直接从上传的源文件中自动抓取各篇语料的<b>【结算单价】</b>并按待结算目标自动对齐，无需手动配置参数。</span>
-        </div>
-        <div style="font-size: 12px; color: #15803d; opacity: 0.85;">纯 Python 原生渲染标准交付表格</div>
-    </div>
-    """)
 
     # 开始生成大按钮（与其它板块完全一致采用居中标准宽度）
     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
@@ -2833,7 +2833,7 @@ elif current_module == MODULE_KOPU:
     render_html(f"""
     <div class="ios-hero-banner">
         <div class="ios-hero-left">
-            <div class="ios-hero-icon-box">
+            <div class="ios-hero-icon-badge">
                 {SVG_KOPU_VIDEO}
             </div>
             <div>
@@ -3045,7 +3045,7 @@ elif current_module == MODULE_DIANPING:
     render_html(f"""
     <div class="ios-hero-banner">
         <div class="ios-hero-left">
-            <div class="ios-hero-icon-box" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);">
+            <div class="ios-hero-icon-badge">
                 {SVG_KOPU_DIANPING}
             </div>
             <div>
