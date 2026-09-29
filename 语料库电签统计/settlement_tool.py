@@ -49,7 +49,7 @@ COLUMN_ALIASES = {
     'branch_name': ['支行名称', '开户支行', '开户网点', '支行', '开户行支行'],
     'question': ['题目内容', '题目', '问答题目', '问题', '题干'],
     'answer': ['回答记录', '回答', '医生回答', '答案', '回答内容'],
-    'project_name': ['项目名称', '参与项目', '项目'],
+    'project_name': ['参与活动', '参与活动规则', '活动名称', '活动', '参与项目', '项目名称', '项目', '所属项目'],
     'domain': ['疾病领域', '领域', '病种']
 }
 
@@ -137,6 +137,35 @@ def format_bank_and_branch(bank_val, branch_val):
     # 7. 银行名称 + 支行名称合并
     return b + br
 
+def calculate_tax_from_gross(gross_pay):
+    """
+    劳务报酬所得个人所得税法定预扣预缴计算（税前应发正向扣税计算税后实发）
+    规则：
+    1. 收入 <= 800 元：免征个税，税额 = 0
+    2. 800 < 收入 <= 4,000 元：应纳税所得额 = 收入 - 800，预扣率 20%，速算扣除数 0
+    3. 收入 > 4,000 元：应纳税所得额 = 收入 * (1 - 20%) = 收入 * 0.8
+       - 应纳税所得额 <= 20,000 元：预扣率 20%，速算扣除数 0
+       - 20,000 < 应纳税所得额 <= 50,000 元：预扣率 30%，速算扣除数 2,000
+       - 应纳税所得额 > 50,000 元：预扣率 40%，速算扣除数 7,000
+    返回: (tax, net_pay) 保留两位小数
+    """
+    gross = float(gross_pay)
+    if gross <= 800.0:
+        tax = 0.0
+    elif gross <= 4000.0:
+        tax = (gross - 800.0) * 0.20
+    else:
+        taxable = gross * 0.80
+        if taxable <= 20000.0:
+            tax = taxable * 0.20
+        elif taxable <= 50000.0:
+            tax = taxable * 0.30 - 2000.0
+        else:
+            tax = taxable * 0.40 - 7000.0
+    tax = round(tax, 2)
+    net_pay = round(gross - tax, 2)
+    return tax, net_pay
+
 # ==================== 2. 强力编号清洗器 ====================
 def normalize_id(val):
     """把各种怪异格式的语料编号/卡号转换为纯净标准字符串"""
@@ -165,6 +194,28 @@ def find_col_name(available_cols, alias_key):
         if clean_t in clean_cols_map:
             return clean_cols_map[clean_t]
     return None
+
+def extract_top_activity_name(activity_list, default_name=""):
+    """
+    从活动/项目名称列表中，统计出现频次最高的单个活动名称：
+    1. 若单元格包含多个活动名称（通过逗号、分号、换行、顿号、斜杠、竖线等分隔），拆分为单独活动计入频次；
+    2. 忽略空白、nan/none/null/空/-等无意义值；
+    3. 统计各活动名称频次，返回出现频次最高的那一个；若无则返回 default_name。
+    """
+    from collections import Counter
+    counts = Counter()
+    for val in activity_list:
+        if val is None or pd.isna(val):
+            continue
+        s = str(val).strip()
+        if not s or s.lower() in ['nan', 'none', 'null', '空', '-']:
+            continue
+        items = [x.strip() for x in re.split(r'[,，、;；\n|/]+', s) if x.strip()]
+        for item in items:
+            counts[item] += 1
+    if not counts:
+        return default_name
+    return counts.most_common(1)[0][0]
 
 # ==================== 3. 智能多工作表检测与加载 ====================
 def load_smart_dataframe(filepath, required_alias_keys):
@@ -227,7 +278,7 @@ def detect_input_files(target_dir):
     # 优先根据文件名关键字识别
     for f in candidate_files:
         fname = os.path.basename(f).lower()
-        if ("支付" in fname or "清单" in fname or "结算" in fname) and ("语料列表" not in fname and "明文" not in fname):
+        if ("支付" in fname or "清单" in fname or "结算" in fname or "劳务" in fname or "费用" in fname) and ("语料列表" not in fname and "明文" not in fname):
             pay_file = f
         elif ("语料列表" in fname or "语料" in fname) and ("支付" not in fname):
             corpus_file = f
@@ -417,6 +468,54 @@ def process_settlement(target_dir="."):
             pass
     month_tag = f"{cur_year}年{cur_month:02d}月"
 
+    # 自动识别提取项目/活动名称 (按出现频次最高规则)
+    top_proj_name = ""
+    candidate_acts = []
+    source_desc = ""
+
+    act_alias_keys = ['参与活动', '参与活动规则', '活动名称', '活动']
+
+    # 1. 优先检查各表是否存在显式活动列（如 "参与活动" / "参与活动规则" / "活动名称"）
+    u_act_col = next((c for c in u_header if any(k == c or k in c for k in act_alias_keys)), None)
+    c_act_col = next((c for c in matched_corpus.columns if any(k == c or k in c for k in act_alias_keys)), None)
+    pay_act_col = next((c for c in df_pay.columns if any(k == c or k in c for k in act_alias_keys)), None)
+
+    if u_act_col:
+        u_idx = u_header.index(u_act_col)
+        candidate_acts = [r[u_idx] for r in u_rows[1:] if len(r) > u_idx]
+        source_desc = f"用户列表【{u_act_col}】列"
+    elif c_act_col:
+        candidate_acts = list(matched_corpus[c_act_col])
+        source_desc = f"语料列表【{c_act_col}】列"
+    elif pay_act_col:
+        candidate_acts = list(df_pay[pay_act_col])
+        source_desc = f"支付清单【{pay_act_col}】列"
+    else:
+        # 2. 若无显式活动列，则检查常规项目列（项目名称 / 参与项目）
+        # 优先使用当前批次已匹配语料表 matched_corpus 中的项目名称（最精准反映当期结算项目）
+        c_proj_col = find_col_name(matched_corpus.columns, 'project_name')
+        pay_proj_col = find_col_name(df_pay.columns, 'project_name')
+        u_proj_col = find_col_name(u_header, 'project_name')
+
+        if c_proj_col and c_proj_col in matched_corpus.columns:
+            candidate_acts = list(matched_corpus[c_proj_col])
+            source_desc = f"已匹配语料【{c_proj_col}】列"
+        elif pay_proj_col and pay_proj_col in df_pay.columns:
+            candidate_acts = list(df_pay[pay_proj_col])
+            source_desc = f"支付清单【{pay_proj_col}】列"
+        elif u_proj_col:
+            u_idx = u_header.index(u_proj_col)
+            candidate_acts = [r[u_idx] for r in u_rows[1:] if len(r) > u_idx]
+            source_desc = f"用户列表【{u_proj_col}】列"
+
+    if candidate_acts:
+        top_proj_name = extract_top_activity_name(candidate_acts, default_name="")
+
+    if top_proj_name:
+        print(f"  ✔ 自动识别项目名称: [{top_proj_name}] (来源: {source_desc}，按最高频次规则统计)")
+    else:
+        print("  ℹ️ 未能从源表格中识别到项目/活动名称，项目名称列将保持为空")
+
     doctor_summary_list = []
     warnings = []
     
@@ -446,8 +545,9 @@ def process_settlement(target_dir="."):
         title = str(grp[c_title_col].iloc[0]).strip() if c_title_col else ""
         count = len(grp)
         
-        # 逐笔累加真实单价
-        total_amt = sum(price_map.get(cid_n, 100.0) for cid_n in grp['CORPUS_ID_NORM'])
+        # 逐笔累加真实单价得到任务应发金额，并正向扣缴个税计算实发金额
+        gross_amt = round(sum(price_map.get(cid_n, 100.0) for cid_n in grp['CORPUS_ID_NORM']), 2)
+        tax_amt, net_amt = calculate_tax_from_gross(gross_amt)
         
         # 首次提交日期
         first_submit_dt = pd.to_datetime(grp[c_time_col]).min() if c_time_col else datetime.now()
@@ -473,8 +573,11 @@ def process_settlement(target_dir="."):
             '开始年*': s_year,
             '开始月*': s_month,
             '开始日*': s_day,
-            '项目名称': '',
-            '金额*': total_amt,
+            '项目名称': top_proj_name,
+            '金额*': net_amt,          # 实发金额（银行实际代发标准金额）
+            '应发金额': gross_amt,       # 任务应发总金额
+            '代扣个税': tax_amt,         # 代扣劳务报酬个税
+            '实发金额': net_amt,         # 税后实发金额
             '姓名1*': name,
             '省份*': prov,
             '市*': city,
@@ -496,7 +599,10 @@ def process_settlement(target_dir="."):
     
     total_docs = len(doctor_summary_list)
     total_corpus_count = sum(d['语料条数'] for d in doctor_summary_list)
-    total_settle_amount = sum(d['金额*'] for d in doctor_summary_list)
+    total_gross_amount = sum(d['应发金额'] for d in doctor_summary_list)
+    total_tax_amount = sum(d['代扣个税'] for d in doctor_summary_list)
+    total_net_amount = sum(d['金额*'] for d in doctor_summary_list)
+    total_settle_amount = total_net_amount
 
     # 导出文件
     final_columns = [
@@ -650,7 +756,7 @@ def process_settlement(target_dir="."):
     ws_d2 = wb_detail.create_sheet(title="医生结算汇总")
     d2_headers = [
         '序号', '医生姓名', '身份证号码', '手机号码', '所在医院', '科室', '职称',
-        '结算语料条数', '应付总金额(元)', '开户银行', '支行名称', '银行卡号',
+        '结算语料条数', '应发总金额(元)', '代扣个税(元)', '实发金额(元)', '开户银行', '支行名称', '银行卡号',
         '省份', '城市', '首次提交日期'
     ]
     for c_idx, h in enumerate(d2_headers, 1):
@@ -662,7 +768,8 @@ def process_settlement(target_dir="."):
     for idx, doc in enumerate(doctor_summary_list, 1):
         r_vals = [
             idx, doc['姓名*'], doc['身份证*'], doc['手机号*'], doc['工作单位*'],
-            doc['科室*'], doc['医务职称*'], doc['语料条数'], doc['金额*'],
+            doc['科室*'], doc['医务职称*'], doc['语料条数'],
+            doc['应发金额'], doc['代扣个税'], doc['实发金额'],
             doc.get('开户银行', doc['开户行*']), doc['支行名称'], doc['银行卡号*'], doc['省份*'], doc['市*'],
             f"{doc['开始年*']}-{doc['开始月*']:02d}-{doc['开始日*']:02d}"
         ]
@@ -672,7 +779,7 @@ def process_settlement(target_dir="."):
                 c.number_format = '@'
                 c.value = str(val)
                 c.alignment = Alignment(horizontal="center", vertical="center")
-            elif d2_headers[c_idx-1] == '应付总金额(元)':
+            elif d2_headers[c_idx-1] in ['应发总金额(元)', '代扣个税(元)', '实发金额(元)']:
                 c.value = float(val)
                 c.number_format = '#,##0.00'
                 c.alignment = Alignment(horizontal="right", vertical="center")
@@ -690,9 +797,18 @@ def process_settlement(target_dir="."):
     ws_d2.cell(row=tot_row, column=1).alignment = Alignment(horizontal="center", vertical="center")
     ws_d2.cell(row=tot_row, column=8, value=total_corpus_count).font = Font(name="微软雅黑", size=10, bold=True)
     ws_d2.cell(row=tot_row, column=8).alignment = Alignment(horizontal="center", vertical="center")
-    ws_d2.cell(row=tot_row, column=9, value=total_settle_amount).font = Font(name="微软雅黑", size=10, bold=True)
+    
+    ws_d2.cell(row=tot_row, column=9, value=total_gross_amount).font = Font(name="微软雅黑", size=10, bold=True)
     ws_d2.cell(row=tot_row, column=9).number_format = '#,##0.00'
     ws_d2.cell(row=tot_row, column=9).alignment = Alignment(horizontal="right", vertical="center")
+    
+    ws_d2.cell(row=tot_row, column=10, value=total_tax_amount).font = Font(name="微软雅黑", size=10, bold=True)
+    ws_d2.cell(row=tot_row, column=10).number_format = '#,##0.00'
+    ws_d2.cell(row=tot_row, column=10).alignment = Alignment(horizontal="right", vertical="center")
+    
+    ws_d2.cell(row=tot_row, column=11, value=total_net_amount).font = Font(name="微软雅黑", size=10, bold=True)
+    ws_d2.cell(row=tot_row, column=11).number_format = '#,##0.00'
+    ws_d2.cell(row=tot_row, column=11).alignment = Alignment(horizontal="right", vertical="center")
     
     for c in range(1, len(d2_headers)+1):
         ws_d2.cell(row=tot_row, column=c).border = border_style
@@ -710,7 +826,11 @@ def process_settlement(target_dir="."):
     print("=" * 65)
     print(f" 📊 本期结算总人数 : {total_docs} 位医生")
     print(f" 📑 本期结算语料数 : {total_corpus_count} 条")
-    print(f" 💰 本期应付总金额 : ¥ {total_settle_amount:,.2f} 元")
+    print(f" 💵 本期应发总金额 : ¥ {total_gross_amount:,.2f} 元")
+    print(f" 🧾 本期代扣个税   : ¥ {total_tax_amount:,.2f} 元")
+    print(f" 💰 本期应付总金额 : ¥ {total_net_amount:,.2f} 元")
+    if top_proj_name:
+        print(f" 🏷️ 本期项目名称   : {top_proj_name}")
     print("-" * 65)
     print(" 📁 生成文件清单：")
     print(f"   1. [标准发放表] {os.path.basename(out_final_xlsx)}")
