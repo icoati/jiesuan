@@ -9,7 +9,7 @@
    - 2.xlsx (专家银行卡与身份资质表)
    - 3.xlsx (语料库全量审核明细表)
 2. 关联匹配与规范化输出 3 张标准化交付表单：
-   - 7_专家劳务报酬明细表.xlsx (基于 4.xlsx 模板格式，内置劳务报酬个税精准正向扣税公式与银行信息)
+   - 7_专家劳务报酬明细表.xlsx (基于 4.xlsx 模板格式，内置劳务报酬个税精准反算公式与银行信息)
    - 8_语料词条明细表.xlsx (基于 5.xlsx 模板格式，按结算单价标记结算状态并保留原始题目/回答记录)
    - 9_项目作品结算表.xlsx (基于 6.xlsx 模板格式，作品维度单价与乘法关联核算)
 =============================================================================
@@ -46,47 +46,24 @@ def find_col(df, candidates, default=None):
                 return c
     return default
 
-def calculate_tax(gross_pay):
+def calculate_tax(net_pay):
     """
-    根据应发劳务报酬金额 (做任务金额) 计算代扣个人所得税与实发金额 (税前正向扣税)
-    国家劳务报酬个税法定扣缴规则：
-    1. 每次收入不超过 4000 元的：
-       - 收入 <= 800 元: 免税，税金 = 0，实发 = 应发
-       - 800 < 收入 <= 4000 元:
-         应纳税所得额 = 收入 - 800
-         税金 = (收入 - 800) * 0.2
-         实发 = 收入 - 税金
-    2. 每次收入超过 4000 元的：
-       应纳税所得额 = 收入 * (1 - 20%) = 收入 * 0.8
-       - 应纳税所得额 <= 20000 元 (即 4000 < 收入 <= 25000 元):
-         预扣率 20%，速算扣除数 0
-         税金 = 应纳税所得额 * 20% = 收入 * 0.8 * 0.2 = 收入 * 0.16
-         实发 = 收入 - 税金
-       - 20000 < 应纳税所得额 <= 50000 元 (即 25000 < 收入 <= 62500 元):
-         预扣率 30%，速算扣除数 2000
-         税金 = 应纳税所得额 * 30% - 2000 = (收入 * 0.8) * 0.3 - 2000
-         实发 = 收入 - 税金
-       - 应纳税所得额 > 50000 元 (即 收入 > 62500 元):
-         预扣率 40%，速算扣除数 7000
-         税金 = 应纳税所得额 * 40% - 7000 = (收入 * 0.8) * 0.4 - 7000
-         实发 = 收入 - 税金
+    根据实发劳务报酬计算应发金额与代扣个人所得税 (税后反算税前)
+    规则：
+    1. 实发 <= 800: 无税，应发 = 实发
+    2. 800 < 实发 <= 3360: 应发 = (实发 - 160) / 0.8, 税金 = 应发 - 实发
+    3. 实发 > 3360: 应发 = 实发 / 0.84, 税金 = 应发 - 实发
     """
-    gross = float(gross_pay)
-    if gross <= 800:
+    if net_pay <= 800:
         tax = 0.0
-    elif gross <= 4000:
-        tax = (gross - 800) * 0.2
+        gross_pay = float(net_pay)
+    elif net_pay <= 3360:
+        gross_pay = round((net_pay - 160) / 0.8, 2)
+        tax = round(gross_pay - net_pay, 2)
     else:
-        taxable = gross * 0.8
-        if taxable <= 20000:
-            tax = taxable * 0.2
-        elif taxable <= 50000:
-            tax = taxable * 0.3 - 2000
-        else:
-            tax = taxable * 0.4 - 7000
-    tax = round(tax, 2)
-    net_pay = round(gross - tax, 2)
-    return tax, net_pay
+        gross_pay = round(net_pay / 0.84, 2)
+        tax = round(gross_pay - net_pay, 2)
+    return gross_pay, tax
 
 def process_beijian_kangbei(
     file_1,                 # 1.xlsx (待结算词条列表)
@@ -283,7 +260,7 @@ def process_beijian_kangbei(
         if pd.isna(title_val):
             title_val = ""
         row_unit_price = float(row_data.get('结算单价', fallback_price))
-        row_vals = [title_val, row_unit_price, "是", 1, "份", f"=B{r_idx}*D{r_idx}"]
+        row_vals = [title_val, row_unit_price, "否", 1, "份", f"=B{r_idx}*D{r_idx}"]
         for c_idx, val in enumerate(row_vals, start=1):
             cell = ws9.cell(r_idx, c_idx, val)
             cell.font = data_font_9
@@ -321,7 +298,7 @@ def process_beijian_kangbei(
     # 行2：说明文字
     ws7.merge_cells("A2:J2")
     ws7.row_dimensions[2].height = 36
-    c2 = ws7.cell(2, 1, "1、下列表格为设置好的核算格式，请勿随意修改设置好的公式或数据。\n2、任务金额直接计入“应发金额”，系统根据国家个人劳务报酬个税预扣率扣除对应税金，计算得出“实发金额”。")
+    c2 = ws7.cell(2, 1, "1、下列表格为设置好的核算公式格式，请勿随意修改设置好的公式。\n2、填写信息时，只需填写各专家的劳务信息及最后一项“实发金额”，其他表格则自动计算应发金额及税金。")
     c2.font = Font(name="宋体", size=11)
     c2.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
@@ -387,7 +364,7 @@ def process_beijian_kangbei(
 
     doc_counts = df3_filtered.groupby([doc_name_col, id_card_col, hosp_col, dept_col, title_col_doc], sort=False).agg(
         count=(col_id_3, 'count'),
-        gross_pay=('结算单价', 'sum'),
+        net_pay=('结算单价', 'sum'),
         phone=(phone_col, 'first')
     ).reset_index()
 
@@ -413,13 +390,13 @@ def process_beijian_kangbei(
         card = binfo.get('card', '')
         branch = binfo.get('branch', '')
 
-        # 任务金额直接作为应发金额（税前），根据劳务报酬个税标准扣除对应税费，计算得出实发金额
-        gross_pay = float(rdata['gross_pay'])
-        tax, net_pay = calculate_tax(gross_pay)
+        # 实发金额直接来自源文件抓取的结算单价汇总，并进行合规个税反算
+        net_pay = float(rdata['net_pay'])
+        gross_pay, tax = calculate_tax(net_pay)
 
-        total_gross_all += gross_pay
-        total_tax_all += tax
         total_net_all += net_pay
+        total_tax_all += tax
+        total_gross_all += gross_pay
 
         row_vals = [
             idx + 1,        # 序号
@@ -494,4 +471,4 @@ if __name__ == '__main__':
         include_all_133=not args.filtered_only,
         price_per_item=args.price
     )
-    print(f"\n处理结果: 词条数: {res['total_items']}, 医生数: {res['total_doctors']}, 应发总额: ¥{res['total_gross']}, 税金: ¥{res['total_tax']}, 实发总额: ¥{res['total_net']}")
+    print(f"\n处理结果: 词条数: {res['total_items']}, 医生数: {res['total_doctors']}, 实发总额: ¥{res['total_net']}")
