@@ -49,7 +49,7 @@ COLUMN_ALIASES = {
     'branch_name': ['支行名称', '开户支行', '开户网点', '支行', '开户行支行'],
     'question': ['题目内容', '题目', '问答题目', '问题', '题干'],
     'answer': ['回答记录', '回答', '医生回答', '答案', '回答内容'],
-    'project_name': ['参与活动', '参与活动规则', '活动名称', '活动', '参与项目', '项目名称', '项目', '所属项目'],
+    'project_name': ['参与项目', '项目名称', '参与活动', '活动名称', '所属项目', '所属项目名称', '项目', '活动', '参与活动规则', '项目名', '活动名', '业务项目'],
     'domain': ['疾病领域', '领域', '病种']
 }
 
@@ -216,6 +216,43 @@ def extract_top_activity_name(activity_list, default_name=""):
     if not counts:
         return default_name
     return counts.most_common(1)[0][0]
+
+def find_project_column(columns):
+    """在列名列表中智能寻找匹配的项目/活动列"""
+    if columns is None:
+        return None
+    proj_keys = [
+        '参与项目', '项目名称', '参与活动', '活动名称', '所属项目',
+        '所属项目名称', '项目', '活动', '参与活动规则', '项目名', '活动名', '业务项目'
+    ]
+    cols_list = list(columns)
+    # 1. 完全匹配（去除空白、星号、下划线）
+    for k in proj_keys:
+        clean_k = re.sub(r'[\s\*_]+', '', k).lower()
+        for c in cols_list:
+            clean_c = re.sub(r'[\s\*_]+', '', str(c)).lower()
+            if clean_c == clean_k:
+                return c
+    # 2. 包含匹配
+    for k in ['参与项目', '项目名称', '参与活动', '活动名称', '所属项目', '所属项目名称', '参与活动规则']:
+        clean_k = re.sub(r'[\s\*_]+', '', k).lower()
+        for c in cols_list:
+            clean_c = re.sub(r'[\s\*_]+', '', str(c)).lower()
+            if clean_k in clean_c or clean_c in clean_k:
+                return c
+    return None
+
+def get_valid_project_values(values_iterable):
+    """提取非空、非nan且有实际意义的项目/活动名称列表"""
+    valid = []
+    for val in values_iterable:
+        if val is None or pd.isna(val):
+            continue
+        s = str(val).strip()
+        if not s or s.lower() in ['nan', 'none', 'null', '空', '-', '无', '/', '\\']:
+            continue
+        valid.append(s)
+    return valid
 
 # ==================== 3. 智能多工作表检测与加载 ====================
 def load_smart_dataframe(filepath, required_alias_keys):
@@ -469,44 +506,39 @@ def process_settlement(target_dir="."):
     month_tag = f"{cur_year}年{cur_month:02d}月"
 
     # 自动识别提取项目/活动名称 (按出现频次最高规则)
+    # 智能检查【用户列表】、【已匹配语料】、【支付清单】中的项目/活动字段
+    u_proj_col = find_project_column(u_header)
+    c_proj_col = find_project_column(matched_corpus.columns)
+    pay_proj_col = find_project_column(df_pay.columns)
+
+    # 提取各表中真正包含非空、有效文本的项目名称数据
+    u_proj_vals = []
+    if u_proj_col:
+        u_idx = u_header.index(u_proj_col)
+        u_proj_vals = get_valid_project_values(r[u_idx] for r in u_rows[1:] if len(r) > u_idx)
+
+    c_proj_vals = []
+    if c_proj_col and c_proj_col in matched_corpus.columns:
+        c_proj_vals = get_valid_project_values(matched_corpus[c_proj_col])
+
+    pay_proj_vals = []
+    if pay_proj_col and pay_proj_col in df_pay.columns:
+        pay_proj_vals = get_valid_project_values(df_pay[pay_proj_col])
+
     top_proj_name = ""
     candidate_acts = []
     source_desc = ""
 
-    act_alias_keys = ['参与活动', '参与活动规则', '活动名称', '活动']
-
-    # 1. 优先检查各表是否存在显式活动列（如 "参与活动" / "参与活动规则" / "活动名称"）
-    u_act_col = next((c for c in u_header if any(k == c or k in c for k in act_alias_keys)), None)
-    c_act_col = next((c for c in matched_corpus.columns if any(k == c or k in c for k in act_alias_keys)), None)
-    pay_act_col = next((c for c in df_pay.columns if any(k == c or k in c for k in act_alias_keys)), None)
-
-    if u_act_col:
-        u_idx = u_header.index(u_act_col)
-        candidate_acts = [r[u_idx] for r in u_rows[1:] if len(r) > u_idx]
-        source_desc = f"用户列表【{u_act_col}】列"
-    elif c_act_col:
-        candidate_acts = list(matched_corpus[c_act_col])
-        source_desc = f"语料列表【{c_act_col}】列"
-    elif pay_act_col:
-        candidate_acts = list(df_pay[pay_act_col])
-        source_desc = f"支付清单【{pay_act_col}】列"
-    else:
-        # 2. 若无显式活动列，则检查常规项目列（项目名称 / 参与项目）
-        # 优先使用当前批次已匹配语料表 matched_corpus 中的项目名称（最精准反映当期结算项目）
-        c_proj_col = find_col_name(matched_corpus.columns, 'project_name')
-        pay_proj_col = find_col_name(df_pay.columns, 'project_name')
-        u_proj_col = find_col_name(u_header, 'project_name')
-
-        if c_proj_col and c_proj_col in matched_corpus.columns:
-            candidate_acts = list(matched_corpus[c_proj_col])
-            source_desc = f"已匹配语料【{c_proj_col}】列"
-        elif pay_proj_col and pay_proj_col in df_pay.columns:
-            candidate_acts = list(df_pay[pay_proj_col])
-            source_desc = f"支付清单【{pay_proj_col}】列"
-        elif u_proj_col:
-            u_idx = u_header.index(u_proj_col)
-            candidate_acts = [r[u_idx] for r in u_rows[1:] if len(r) > u_idx]
-            source_desc = f"用户列表【{u_proj_col}】列"
+    # 选取包含实际有效内容的来源（优先语料，次选用户列表，再次支付清单）
+    if c_proj_vals:
+        candidate_acts = c_proj_vals
+        source_desc = f"已匹配语料【{c_proj_col}】列"
+    elif u_proj_vals:
+        candidate_acts = u_proj_vals
+        source_desc = f"用户列表【{u_proj_col}】列"
+    elif pay_proj_vals:
+        candidate_acts = pay_proj_vals
+        source_desc = f"支付清单【{pay_proj_col}】列"
 
     if candidate_acts:
         top_proj_name = extract_top_activity_name(candidate_acts, default_name="")
@@ -514,7 +546,7 @@ def process_settlement(target_dir="."):
     if top_proj_name:
         print(f"  ✔ 自动识别项目名称: [{top_proj_name}] (来源: {source_desc}，按最高频次规则统计)")
     else:
-        print("  ℹ️ 未能从源表格中识别到项目/活动名称，项目名称列将保持为空")
+        print("  ℹ️ 未能从源表格中识别到有效项目/活动名称，项目名称列将保持为空")
 
     doctor_summary_list = []
     warnings = []
@@ -567,13 +599,31 @@ def process_settlement(target_dir="."):
             warnings.append(f"医生【{name}】(手机: {phone}, 身份证: {cid}) 未在用户列表中找到银行卡号！")
             
         prov, city = parse_hospital_location(hosp)
+
+        # 医生所属项目名称判定：
+        # 1. 优先取该医生在用户列表中的个人参与项目/活动
+        doc_proj = ""
+        if u_proj_col and u_info.get(u_proj_col):
+            raw_p = str(u_info.get(u_proj_col)).strip()
+            if raw_p and raw_p.lower() not in ['nan', 'none', 'null', '空', '-', '无']:
+                doc_proj = extract_top_activity_name([raw_p], default_name=raw_p)
+        
+        # 2. 若用户列表无，且当前语料中有该医生的项目名称，取语料中的项目名称
+        if not doc_proj and c_proj_col and c_proj_col in grp.columns:
+            grp_proj_vals = get_valid_project_values(grp[c_proj_col])
+            if grp_proj_vals:
+                doc_proj = extract_top_activity_name(grp_proj_vals, default_name=grp_proj_vals[0])
+
+        # 3. 若仍无，则回退到全批次统计出的最高频项目名称
+        if not doc_proj:
+            doc_proj = top_proj_name
         
         doctor_summary_list.append({
             '姓名*': name,
             '开始年*': s_year,
             '开始月*': s_month,
             '开始日*': s_day,
-            '项目名称': top_proj_name,
+            '项目名称': doc_proj,
             '金额*': net_amt,          # 实发金额（银行实际代发标准金额）
             '应发金额': gross_amt,       # 任务应发总金额
             '代扣个税': tax_amt,         # 代扣劳务报酬个税
