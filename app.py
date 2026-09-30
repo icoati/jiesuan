@@ -2885,246 +2885,222 @@ elif current_module == MODULE_BEIJIAN:
                 render_html('<span class="ios-badge-pending">待识别：3. 语料库全量明细表 (3.xlsx)</span>', container=chk_cols[2])
 
 
-    # ================= 专属高颜值：结算核算模式与交付规格卡片 =================
-    st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
-    _, col_deck, _ = st.columns([1, 1.8, 1])
-    with col_deck:
-        with st.container(border=True):
-            st.markdown("""
-            <div class="settle-deck-header">
-                <div class="settle-deck-title">
-                    <span style="font-size: 1.15rem;">⚖️</span>
-                    <span>核算模式与计税规格</span>
-                </div>
-                <span class="settle-deck-badge">自由切换 · 自动关联输出表名</span>
-            </div>
-            """, unsafe_allow_html=True)
+    # ================= 专属高颜值：按照 HCP 风格采用 st.tabs 呈现选项 =================
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    tab_tax, tab_notax = st.tabs(["🧮 倒推算税", "⚡ 不算税"])
 
-            beijian_mode_choice = st.radio(
-                "结算核算模式选择：",
-                options=["🧮 倒推算税（反算税前）", "⚡ 不算税（实发=应发）"],
-                index=0,
-                horizontal=True,
-                key="beijian_calc_mode",
-                label_visibility="collapsed"
-            )
-
-            is_notax = "不算税" in beijian_mode_choice
-            beijian_mode = "不算税" if is_notax else "倒推算税"
-
-            if is_notax:
-                st.markdown("""
-                <div class="mode-spec-callout mode-spec-notax">
-                    <div style="display: flex; align-items: center; justify-content: space-between; font-weight: 700;">
-                        <span>⚡ 当前生效：不算税模式（免税直发）</span>
-                        <span style="font-size: 0.78rem; background: rgba(16, 185, 129, 0.15); padding: 2px 8px; border-radius: 6px;">交付文件：不算税-日期.xlsx</span>
-                    </div>
-                    <div style="font-size: 0.83rem; opacity: 0.9; margin-top: 4px;">
-                        • 任务金额直接作为税前与税后全额实发，税金强制为 <b>¥ 0.00</b> 元（应发金额 = 实发金额）<br>
-                        • 适用于免税类劳务报销、已独立完税或由专家本人自主综合所得年度汇算申报
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div class="mode-spec-callout mode-spec-tax">
-                    <div style="display: flex; align-items: center; justify-content: space-between; font-weight: 700;">
-                        <span>🧮 当前生效：倒推算税模式（税后反推税前）</span>
-                        <span style="font-size: 0.78rem; background: rgba(2, 132, 199, 0.15); padding: 2px 8px; border-radius: 6px;">交付文件：算税-日期.xlsx</span>
-                    </div>
-                    <div style="font-size: 0.83rem; opacity: 0.9; margin-top: 4px;">
-                        • 任务金额视为<b>税后实发</b>，系统依劳务报酬标准分级反算税前应发并自动代扣税金<br>
-                        • 适用于主办方按税后实付承诺结算，税金由项目方代扣承担
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
-        btn_start_beijian = st.button(
-            f"🚀 开始生成：{MODULE_BEIJIAN}（{beijian_mode}）",
-            type="primary",
-            use_container_width=True
-        )
-
-    if btn_start_beijian:
+    def run_beijian_settlement(beijian_mode: str):
         if not file_1_obj or not file_2_obj or not file_3_obj:
             st.error("未识别齐全部 3 张关键表格！请在上方上传区拖入或选择包含【1. 待结算词条列表】、【2. 专家银行卡信息表】及【3. 语料库全量明细表】的文件。")
-        else:
-            with st.status(f"正在沙盒环境中执行【{MODULE_BEIJIAN}】核心结算逻辑（模式：{beijian_mode}）...", expanded=True) as status:
-                st.write("1. 正在初始化沙盒与暂存上传文件...")
-                temp_dir = tempfile.mkdtemp()
+            return
+
+        with st.status(f"正在沙盒环境中执行【{MODULE_BEIJIAN}】核心结算逻辑（模式：{beijian_mode}）...", expanded=True) as status:
+            st.write("1. 正在初始化沙盒与暂存上传文件...")
+            temp_dir = tempfile.mkdtemp()
+            try:
+                f1_path = os.path.join(temp_dir, file_1_obj.name)
+                with open(f1_path, "wb") as f:
+                    f.write(file_1_obj.getvalue())
+
+                f2_path = os.path.join(temp_dir, file_2_obj.name)
+                with open(f2_path, "wb") as f:
+                    f.write(file_2_obj.getvalue())
+
+                f3_path = os.path.join(temp_dir, file_3_obj.name)
+                with open(f3_path, "wb") as f:
+                    f.write(file_3_obj.getvalue())
+
+                st.write(f"2. 调度北检结算表核算引擎（{beijian_mode}）...")
+                import importlib
                 try:
-                    f1_path = os.path.join(temp_dir, file_1_obj.name)
-                    with open(f1_path, "wb") as f:
-                        f.write(file_1_obj.getvalue())
+                    if beijian_mode == "不算税":
+                        beijian_engine = importlib.import_module("北检结算表.generate_settlement_notax")
+                    else:
+                        beijian_engine = importlib.import_module("北检结算表.generate_settlement")
+                except ModuleNotFoundError:
+                    if beijian_mode == "不算税":
+                        beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement_notax")
+                    else:
+                        beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement")
 
-                    f2_path = os.path.join(temp_dir, file_2_obj.name)
-                    with open(f2_path, "wb") as f:
-                        f.write(file_2_obj.getvalue())
+                logs_list = []
+                def log_collector(msg):
+                    clean_msg = str(msg).strip()
+                    logs_list.append(clean_msg)
+                    st.write(clean_msg)
 
-                    f3_path = os.path.join(temp_dir, file_3_obj.name)
-                    with open(f3_path, "wb") as f:
-                        f.write(file_3_obj.getvalue())
+                res = beijian_engine.process_beijian_kangbei(
+                    file_1=f1_path,
+                    file_2=f2_path,
+                    file_3=f3_path,
+                    output_dir=temp_dir,
+                    include_all_133=True,
+                    log_func=log_collector
+                )
 
-                    st.write(f"2. 调度北检结算表核算引擎（{beijian_mode}）...")
-                    import importlib
-                    try:
+                if res.get("success"):
+                    today_str = get_beijing_now().strftime("%Y-%m-%d")
+                    final_base_name = f"不算税-{today_str}" if beijian_mode == "不算税" else f"算税-{today_str}"
+                    final_xlsx_name = f"{final_base_name}.xlsx"
+                    zip_file_name = f"{final_base_name}.zip"
+
+                    status.update(label=f"【{MODULE_BEIJIAN}】({beijian_mode}) 处理完成！", state="complete")
+                    st.success(f"对账与结算明细表单生成完毕！最终表格已生成：【{final_xlsx_name}】")
+
+                    # KPI 指标展示
+                    st.markdown("##### 结算核对核心指标看板")
+                    k1, k2, k3, k4 = st.columns(4)
+                    with k1:
+                        st.metric("本次结算词条数", f"{res['total_items']} 篇")
+                    with k2:
+                        st.metric("本次结算专家数", f"{res['total_doctors']} 位")
+                    with k3:
+                        st.metric("实发劳务总金额", f"¥ {res['total_net']:,.2f}")
+                    with k4:
                         if beijian_mode == "不算税":
-                            beijian_engine = importlib.import_module("北检结算表.generate_settlement_notax")
+                            st.metric("应发税前总额", f"¥ {res['total_gross']:,.2f}", delta="¥ 0.00 免扣税金")
                         else:
-                            beijian_engine = importlib.import_module("北检结算表.generate_settlement")
-                    except ModuleNotFoundError:
-                        if beijian_mode == "不算税":
-                            beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement_notax")
-                        else:
-                            beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement")
+                            st.metric("应发税前总额", f"¥ {res['total_gross']:,.2f}", delta=f"-¥ {res['total_tax']:,.2f} 税金")
 
-                    logs_list = []
-                    def log_collector(msg):
-                        clean_msg = str(msg).strip()
-                        logs_list.append(clean_msg)
-                        st.write(clean_msg)
+                    # 读取生成文件
+                    files_map = res.get("files", {})
+                    f_final_path = files_map.get(final_xlsx_name) or files_map.get("7_专家劳务报酬明细表.xlsx")
+                    f8_path = files_map.get("8_已结算语料词条明细表.xlsx")
+                    f9_path = files_map.get("9_作品劳务结算总表.xlsx")
 
-                    res = beijian_engine.process_beijian_kangbei(
-                        file_1=f1_path,
-                        file_2=f2_path,
-                        file_3=f3_path,
-                        output_dir=temp_dir,
-                        include_all_133=True,
-                        log_func=log_collector
-                    )
+                    f_final_bytes = open(f_final_path, "rb").read() if f_final_path and os.path.exists(f_final_path) else None
+                    f8_bytes = open(f8_path, "rb").read() if f8_path and os.path.exists(f8_path) else None
+                    f9_bytes = open(f9_path, "rb").read() if f9_path and os.path.exists(f9_path) else None
 
-                    if res.get("success"):
-                        today_str = get_beijing_now().strftime("%Y-%m-%d")
-                        final_base_name = f"不算税-{today_str}" if beijian_mode == "不算税" else f"算税-{today_str}"
-                        final_xlsx_name = f"{final_base_name}.xlsx"
-                        zip_file_name = f"{final_base_name}.zip"
+                    # 打包 ZIP
+                    all_outputs = {}
+                    if f_final_bytes:
+                        all_outputs[final_xlsx_name] = f_final_bytes
+                    if f8_bytes:
+                        all_outputs["8_已结算语料词条明细表.xlsx"] = f8_bytes
+                    if f9_bytes:
+                        all_outputs["9_作品劳务结算总表.xlsx"] = f9_bytes
 
-                        status.update(label=f"【{MODULE_BEIJIAN}】({beijian_mode}) 处理完成！", state="complete")
-                        st.success(f"对账与结算明细表单生成完毕！最终表格已生成：【{final_xlsx_name}】")
+                    zip_bytes = create_zip_archive(all_outputs)
 
-                        # KPI 指标展示
-                        st.markdown("##### 结算核对核心指标看板")
-                        k1, k2, k3, k4 = st.columns(4)
-                        with k1:
-                            st.metric("本次结算词条数", f"{res['total_items']} 篇")
-                        with k2:
-                            st.metric("本次结算专家数", f"{res['total_doctors']} 位")
-                        with k3:
-                            st.metric("实发劳务总金额", f"¥ {res['total_net']:,.2f}")
-                        with k4:
-                            if beijian_mode == "不算税":
-                                st.metric("应发税前总额", f"¥ {res['total_gross']:,.2f}", delta="¥ 0.00 免扣税金")
-                            else:
-                                st.metric("应发税前总额", f"¥ {res['total_gross']:,.2f}", delta=f"-¥ {res['total_tax']:,.2f} 税金")
+                    # 自动归档至历史记录
+                    beijian_hist_files = dict(all_outputs)
+                    if zip_bytes:
+                        beijian_hist_files[zip_file_name] = zip_bytes
+                    beijian_summary = f"[{beijian_mode}] 结算专家 {res.get('total_doctors', 0)} 位 · 语料词条 {res.get('total_items', 0)} 篇 · 实发总额 ¥ {res.get('total_net', 0):,.2f} · 应发 ¥ {res.get('total_gross', 0):,.2f} · 税金 ¥ {res.get('total_tax', 0):,.2f}"
+                    history_manager.save_run(MODULE_BEIJIAN, beijian_hist_files, summary=beijian_summary)
 
-                        # 读取生成文件
-                        files_map = res.get("files", {})
-                        f_final_path = files_map.get(final_xlsx_name) or files_map.get("7_专家劳务报酬明细表.xlsx")
-                        f8_path = files_map.get("8_已结算语料词条明细表.xlsx")
-                        f9_path = files_map.get("9_作品劳务结算总表.xlsx")
+                    # 下载按钮组
+                    st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+                    _, col_dl_zip, _ = st.columns([1, 1.8, 1])
+                    with col_dl_zip:
+                        st.download_button(
+                            label=f"📦 一键打包下载全部结算表单 ({zip_file_name}) ({format_size(len(zip_bytes))})",
+                            data=zip_bytes,
+                            file_name=zip_file_name,
+                            mime="application/zip",
+                            use_container_width=True,
+                            type="primary",
+                            key=f"dl_zip_{beijian_mode}"
+                        )
 
-                        f_final_bytes = open(f_final_path, "rb").read() if f_final_path and os.path.exists(f_final_path) else None
-                        f8_bytes = open(f8_path, "rb").read() if f8_path and os.path.exists(f8_path) else None
-                        f9_bytes = open(f9_path, "rb").read() if f9_path and os.path.exists(f9_path) else None
-
-                        # 打包 ZIP
-                        all_outputs = {}
+                    cd1, cd2, cd3 = st.columns(3)
+                    with cd1:
                         if f_final_bytes:
-                            all_outputs[final_xlsx_name] = f_final_bytes
-                        if f8_bytes:
-                            all_outputs["8_已结算语料词条明细表.xlsx"] = f8_bytes
-                        if f9_bytes:
-                            all_outputs["9_作品劳务结算总表.xlsx"] = f9_bytes
-
-                        zip_bytes = create_zip_archive(all_outputs)
-
-                        # 自动归档至历史记录
-                        beijian_hist_files = dict(all_outputs)
-                        if zip_bytes:
-                            beijian_hist_files[zip_file_name] = zip_bytes
-                        beijian_summary = f"[{beijian_mode}] 结算专家 {res.get('total_doctors', 0)} 位 · 语料词条 {res.get('total_items', 0)} 篇 · 实发总额 ¥ {res.get('total_net', 0):,.2f} · 应发 ¥ {res.get('total_gross', 0):,.2f} · 税金 ¥ {res.get('total_tax', 0):,.2f}"
-                        history_manager.save_run(MODULE_BEIJIAN, beijian_hist_files, summary=beijian_summary)
-
-                        # 下载按钮组
-                        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
-                        _, col_dl_zip, _ = st.columns([1, 1.8, 1])
-                        with col_dl_zip:
                             st.download_button(
-                                label=f"📦 一键打包下载全部结算表单 ({zip_file_name}) ({format_size(len(zip_bytes))})",
-                                data=zip_bytes,
-                                file_name=zip_file_name,
-                                mime="application/zip",
+                                label=f"📄 下载最终表格【{final_xlsx_name}】 ({format_size(len(f_final_bytes))})",
+                                data=f_final_bytes,
+                                file_name=final_xlsx_name,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 use_container_width=True,
-                                type="primary"
+                                key=f"dl_final_{beijian_mode}"
+                            )
+                    with cd2:
+                        if f8_bytes:
+                            st.download_button(
+                                label=f"📄 下载【8. 语料词条明细表】 ({format_size(len(f8_bytes))})",
+                                data=f8_bytes,
+                                file_name="8_已结算语料词条明细表.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key=f"dl_f8_{beijian_mode}"
+                            )
+                    with cd3:
+                        if f9_bytes:
+                            st.download_button(
+                                label=f"📄 下载【9. 项目作品结算表】 ({format_size(len(f9_bytes))})",
+                                data=f9_bytes,
+                                file_name="9_作品劳务结算总表.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key=f"dl_f9_{beijian_mode}"
                             )
 
-                        cd1, cd2, cd3 = st.columns(3)
-                        with cd1:
-                            if f_final_bytes:
-                                st.download_button(
-                                    label=f"📄 下载最终表格【{final_xlsx_name}】 ({format_size(len(f_final_bytes))})",
-                                    data=f_final_bytes,
-                                    file_name=final_xlsx_name,
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    use_container_width=True
-                                )
-                        with cd2:
-                            if f8_bytes:
-                                st.download_button(
-                                    label=f"📄 下载【8. 语料词条明细表】 ({format_size(len(f8_bytes))})",
-                                    data=f8_bytes,
-                                    file_name="8_已结算语料词条明细表.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    use_container_width=True
-                                )
-                        with cd3:
-                            if f9_bytes:
-                                st.download_button(
-                                    label=f"📄 下载【9. 项目作品结算表】 ({format_size(len(f9_bytes))})",
-                                    data=f9_bytes,
-                                    file_name="9_作品劳务结算总表.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    use_container_width=True
-                                )
+                    # 数据预览 Tabs
+                    st.markdown("##### 生成结果数据在线预览")
+                    tab_final, tab8, tab9 = st.tabs([f"最终表格 ({final_xlsx_name})", "8. 语料词条明细表", "9. 项目作品结算表"])
+                    with tab_final:
+                        if f_final_bytes:
+                            try:
+                                df_final_prev = pd.read_excel(io.BytesIO(f_final_bytes), skiprows=3)
+                                st.dataframe(df_final_prev.head(100), use_container_width=True)
+                            except Exception as e:
+                                st.caption(f"预览加载失败: {e}")
+                    with tab8:
+                        if f8_bytes:
+                            try:
+                                df8_prev = pd.read_excel(io.BytesIO(f8_bytes))
+                                st.dataframe(df8_prev.head(100), use_container_width=True)
+                            except Exception as e:
+                                st.caption(f"预览加载失败: {e}")
+                    with tab9:
+                        if f9_bytes:
+                            try:
+                                df9_prev = pd.read_excel(io.BytesIO(f9_bytes), skiprows=3)
+                                st.dataframe(df9_prev.head(100), use_container_width=True)
+                            except Exception as e:
+                                st.caption(f"预览加载失败: {e}")
 
-                        # 数据预览 Tabs
-                        st.markdown("##### 生成结果数据在线预览")
-                        tab_final, tab8, tab9 = st.tabs([f"最终表格 ({final_xlsx_name})", "8. 语料词条明细表", "9. 项目作品结算表"])
-                        with tab_final:
-                            if f_final_bytes:
-                                try:
-                                    df_final_prev = pd.read_excel(io.BytesIO(f_final_bytes), skiprows=3)
-                                    st.dataframe(df_final_prev.head(100), use_container_width=True)
-                                except Exception as e:
-                                    st.caption(f"预览加载失败: {e}")
-                        with tab8:
-                            if f8_bytes:
-                                try:
-                                    df8_prev = pd.read_excel(io.BytesIO(f8_bytes))
-                                    st.dataframe(df8_prev.head(100), use_container_width=True)
-                                except Exception as e:
-                                    st.caption(f"预览加载失败: {e}")
-                        with tab9:
-                            if f9_bytes:
-                                try:
-                                    df9_prev = pd.read_excel(io.BytesIO(f9_bytes), skiprows=3)
-                                    st.dataframe(df9_prev.head(100), use_container_width=True)
-                                except Exception as e:
-                                    st.caption(f"预览加载失败: {e}")
+                else:
+                    status.update(label="处理失败", state="error")
+                    st.error("执行过程出现错误，请检查输入表格格式。")
 
-                    else:
-                        status.update(label="处理失败", state="error")
-                        st.error("执行过程出现错误，请检查输入表格格式。")
+            except Exception as e:
+                status.update(label="处理异常", state="error")
+                st.error(f"处理数据时发生异常: {str(e)}")
+            finally:
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception:
+                    pass
 
-                except Exception as e:
-                    status.update(label="处理异常", state="error")
-                    st.error(f"处理数据时发生异常: {str(e)}")
-                finally:
-                    try:
-                        shutil.rmtree(temp_dir)
-                    except Exception:
-                        pass
+    with tab_tax:
+        st.markdown("""
+        <div style="background: rgba(2, 132, 199, 0.05); border: 1px solid rgba(2, 132, 199, 0.2); border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; color: #0369a1; font-size: 0.88rem; line-height: 1.55;">
+            <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 4px;">🧮 倒推算税模式说明：</div>
+            • <b>核算规则</b>：任务金额视为<b>税后实发</b>，系统依劳务报酬标准分级反算税前应发并自动代扣对应个税（实发≤800免税；800~3360按20%反算；>3360按分级加权反算）。<br>
+            • <b>交付表单</b>：主报销单命名为 <code>算税-YYYY-MM-DD.xlsx</code>，附带代扣个税凭证列；打包为 <code>算税-YYYY-MM-DD.zip</code>。
+        </div>
+        """, unsafe_allow_html=True)
+        _, col_btn_tax, _ = st.columns([1, 1.8, 1])
+        with col_btn_tax:
+            btn_start_tax = st.button("🚀 开始生成：北检结算表（倒推算税）", type="primary", use_container_width=True, key="btn_exec_beijian_tax")
+        if btn_start_tax:
+            run_beijian_settlement("倒推算税")
+
+    with tab_notax:
+        st.markdown("""
+        <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; color: #047857; font-size: 0.88rem; line-height: 1.55;">
+            <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 4px;">⚡ 不算税模式说明：</div>
+            • <b>核算规则</b>：任务金额直接作为税前与税后全额实发，税金强制为 <b>¥ 0.00</b> 元（应发金额 = 实发金额）。<br>
+            • <b>交付表单</b>：主报销单命名为 <code>不算税-YYYY-MM-DD.xlsx</code>，应发与实发一致；打包为 <code>不算税-YYYY-MM-DD.zip</code>。
+        </div>
+        """, unsafe_allow_html=True)
+        _, col_btn_notax, _ = st.columns([1, 1.8, 1])
+        with col_btn_notax:
+            btn_start_notax = st.button("🚀 开始生成：北检结算表（不算税）", type="primary", use_container_width=True, key="btn_exec_beijian_notax")
+        if btn_start_notax:
+            run_beijian_settlement("不算税")
 
 
 # =============================================================
