@@ -89,6 +89,14 @@ def get_module_history_dir(module_name: str) -> str:
     _ensure_base_dir()
     safe_name = _sanitize_name(module_name)
     m_dir = os.path.join(HISTORY_BASE_DIR, safe_name)
+    # 兼容历史名称迁移：语料库电签信息表 -> 康恩贝语料库电签表
+    if safe_name == "康恩贝语料库电签表":
+        old_dir = os.path.join(HISTORY_BASE_DIR, "语料库电签信息表")
+        if os.path.exists(old_dir) and not os.path.exists(m_dir):
+            try:
+                os.rename(old_dir, m_dir)
+            except Exception:
+                pass
     if not os.path.exists(m_dir):
         os.makedirs(m_dir, exist_ok=True)
     return m_dir
