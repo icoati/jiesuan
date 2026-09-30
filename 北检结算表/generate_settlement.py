@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
-北检 & 康恩贝结算表生成引擎 (Beijian & CONBA Settlement Engine)
+北检结算表生成引擎 (Beijian Settlement Engine)
 =============================================================================
 功能说明：
 1. 接收 3 张核心源表：
@@ -78,12 +78,12 @@ def process_beijian_kangbei(
     log_func=print
 ):
     """
-    北检 & 康恩贝结算表完整处理主函数
+    北检结算表完整处理主函数
     """
     if log_func is None:
         log_func = print
 
-    log_func("[提示] 启动北检&康恩贝结算表生成流水线...")
+    log_func("[提示] 启动北检结算表生成流水线...")
     os.makedirs(output_dir, exist_ok=True)
 
     # 1. 采用 100% 纯原生 Python 动态生成规范化交付报表，零外部 Excel 模板依赖

@@ -1296,7 +1296,7 @@ MODULE_CORPUS = "康恩贝语料库电签表"
 MODULE_ZHENGHE = "北京整合-上药雷允上结算包"
 MODULE_JUMEI = "陈菊梅基金会-雷允上结算包"
 MODULE_SAAS = "老Saas医院导入模板"
-MODULE_BEIJIAN = "北检&康恩贝结算表"
+MODULE_BEIJIAN = "北检结算表"
 MODULE_KOPU = "北检&华东科普视频电签表"
 MODULE_DIANPING = "北检&华东科普点评电签表"
 MODULE_BANK_CLEAN = "HCP开户行清洗与质检"
@@ -2767,7 +2767,7 @@ elif current_module == MODULE_SAAS:
 
 
 # =============================================================
-# 模块六：北检&康恩贝结算表
+# 模块六：北检结算表
 # =============================================================
 elif current_module == MODULE_BEIJIAN:
     render_html(f"""
@@ -2966,12 +2966,18 @@ elif current_module == MODULE_BEIJIAN:
                     with open(f3_path, "wb") as f:
                         f.write(file_3_obj.getvalue())
 
-                    st.write(f"2. 调度北检&康恩贝核算引擎（{beijian_mode}）...")
+                    st.write(f"2. 调度北检结算表核算引擎（{beijian_mode}）...")
                     import importlib
-                    if beijian_mode == "不算税":
-                        beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement_notax")
-                    else:
-                        beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement")
+                    try:
+                        if beijian_mode == "不算税":
+                            beijian_engine = importlib.import_module("北检结算表.generate_settlement_notax")
+                        else:
+                            beijian_engine = importlib.import_module("北检结算表.generate_settlement")
+                    except ModuleNotFoundError:
+                        if beijian_mode == "不算税":
+                            beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement_notax")
+                        else:
+                            beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement")
 
                     logs_list = []
                     def log_collector(msg):
