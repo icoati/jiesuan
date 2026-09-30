@@ -803,6 +803,238 @@ render_html("""
         transform: translateY(-1.5px) !important;
         box-shadow: 0 8px 22px rgba(16, 185, 129, 0.4) !important;
     }
+
+    /* ================= 结算模式专属原生容器卡片美化 (Apple Segmented Deck) ================= */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) {
+        border-radius: 18px !important;
+        border: 1px solid #e2e8f0 !important;
+        background: #ffffff !important;
+        box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+        padding: 14px 18px 16px 18px !important;
+        margin-top: 10px !important;
+        margin-bottom: 4px !important;
+    }
+    @media (prefers-color-scheme: dark) {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) {
+            background: #1e2430 !important;
+            border-color: rgba(255, 255, 255, 0.08) !important;
+            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.3) !important;
+        }
+    }
+    [data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) {
+        background: #1e2430 !important;
+        border-color: rgba(255, 255, 255, 0.08) !important;
+    }
+
+    .settle-deck-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 2px 2px 8px 2px;
+        border-bottom: 1px solid #f1f5f9;
+        margin-bottom: 6px;
+    }
+    @media (prefers-color-scheme: dark) {
+        .settle-deck-header {
+            border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+        }
+    }
+    [data-theme="dark"] .settle-deck-header {
+        border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    .settle-deck-title {
+        font-size: 0.96rem;
+        font-weight: 700;
+        color: #0f172a;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    @media (prefers-color-scheme: dark) {
+        .settle-deck-title { color: #f8fafc !important; }
+    }
+    [data-theme="dark"] .settle-deck-title { color: #f8fafc !important; }
+
+    .settle-deck-badge {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #0284c7;
+        background: rgba(2, 132, 199, 0.08);
+        border: 1px solid rgba(2, 132, 199, 0.2);
+        padding: 2px 10px;
+        border-radius: 9999px;
+    }
+
+    /* 隐藏当前模式选择卡片内部 st.radio 的原生 label */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) div[data-testid="stRadio"] label[data-testid="stWidgetLabel"] {
+        display: none !important;
+    }
+
+    /* 选项轨道整体变为现代 iOS 分段跑道 (强制单行不换行) */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) div[data-testid="stRadio"] [data-testid="stRadioGroup"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 8px !important;
+        background: #f1f5f9 !important;
+        padding: 5px !important;
+        border-radius: 14px !important;
+        border: 1px solid #e2e8f0 !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    @media (prefers-color-scheme: dark) {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) div[data-testid="stRadio"] [data-testid="stRadioGroup"] {
+            background: #141820 !important;
+            border-color: rgba(255, 255, 255, 0.1) !important;
+        }
+    }
+    [data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) div[data-testid="stRadio"] [data-testid="stRadioGroup"] {
+        background: #141820 !important;
+        border-color: rgba(255, 255, 255, 0.1) !important;
+    }
+
+    /* 单个选项胶囊按钮 (各占 50% 纯正分段排版) */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"] {
+        flex: 1 1 0% !important;
+        min-width: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 10px 14px !important;
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+        font-size: 0.92rem !important;
+        cursor: pointer !important;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        background: transparent !important;
+        color: #64748b !important;
+        margin: 0 !important;
+        border: none !important;
+        user-select: none !important;
+        white-space: nowrap !important;
+    }
+    @media (prefers-color-scheme: dark) {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"] {
+            color: #94a3b8 !important;
+        }
+    }
+    [data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"] {
+        color: #94a3b8 !important;
+    }
+
+    /* 彻底移除丑陋的原生单选小圆圈 */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"] > div > div > div:first-child {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+    }
+
+    /* 文字居中展示 */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"] [data-testid="stMarkdownContainer"] {
+        width: 100% !important;
+        text-align: center !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"] [data-testid="stMarkdownContainer"] p {
+        margin: 0 !important;
+        font-size: 0.92rem !important;
+        font-weight: 600 !important;
+        white-space: nowrap !important;
+        text-overflow: ellipsis !important;
+        overflow: hidden !important;
+    }
+
+    /* 悬停微动效 */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"]:hover {
+        color: #0f172a !important;
+        background: rgba(255, 255, 255, 0.6) !important;
+    }
+    @media (prefers-color-scheme: dark) {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"]:hover {
+            color: #f8fafc !important;
+            background: rgba(255, 255, 255, 0.05) !important;
+        }
+    }
+    [data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"]:hover {
+        color: #f8fafc !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+    }
+
+    /* 选中激活状态：纯白卡片、立体柔和投影、主品牌蓝字 */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"][data-selected="true"] {
+        background: #ffffff !important;
+        color: #0284c7 !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"][data-selected="true"] [data-testid="stMarkdownContainer"] p {
+        color: #0284c7 !important;
+        font-weight: 700 !important;
+    }
+    @media (prefers-color-scheme: dark) {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"][data-selected="true"] {
+            background: #252d3d !important;
+            color: #38bdf8 !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"][data-selected="true"] [data-testid="stMarkdownContainer"] p {
+            color: #38bdf8 !important;
+        }
+    }
+    [data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"][data-selected="true"] {
+        background: #252d3d !important;
+        color: #38bdf8 !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+    }
+    [data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"]:has(.settle-deck-header) [data-testid="stRadioOption"][data-selected="true"] [data-testid="stMarkdownContainer"] p {
+        color: #38bdf8 !important;
+    }
+
+    /* 规则动态提示气泡卡片 */
+    .mode-spec-callout {
+        margin-top: 6px;
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-size: 0.86rem;
+        line-height: 1.55;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        transition: all 0.25s ease;
+    }
+    .mode-spec-tax {
+        background: rgba(2, 132, 199, 0.05);
+        border: 1px solid rgba(2, 132, 199, 0.2);
+        color: #0369a1;
+    }
+    .mode-spec-notax {
+        background: rgba(16, 185, 129, 0.05);
+        border: 1px solid rgba(16, 185, 129, 0.22);
+        color: #047857;
+    }
+    @media (prefers-color-scheme: dark) {
+        .mode-spec-tax {
+            background: rgba(56, 189, 248, 0.08) !important;
+            border-color: rgba(56, 189, 248, 0.25) !important;
+            color: #7dd3fc !important;
+        }
+        .mode-spec-notax {
+            background: rgba(52, 211, 153, 0.08) !important;
+            border-color: rgba(52, 211, 153, 0.25) !important;
+            color: #6ee7b7 !important;
+        }
+    }
+    [data-theme="dark"] .mode-spec-tax {
+        background: rgba(56, 189, 248, 0.08) !important;
+        border-color: rgba(56, 189, 248, 0.25) !important;
+        color: #7dd3fc !important;
+    }
+    [data-theme="dark"] .mode-spec-notax {
+        background: rgba(52, 211, 153, 0.08) !important;
+        border-color: rgba(52, 211, 153, 0.25) !important;
+        color: #6ee7b7 !important;
+    }
 </style>
 """)
 
@@ -2653,25 +2885,63 @@ elif current_module == MODULE_BEIJIAN:
                 render_html('<span class="ios-badge-pending">待识别：3. 语料库全量明细表 (3.xlsx)</span>', container=chk_cols[2])
 
 
-    # 结算核算模式选择（倒推算税 vs 不算税）
-    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-    _, col_mode, _ = st.columns([1, 2.2, 1])
-    with col_mode:
-        beijian_mode = st.radio(
-            "结算核算模式选择：",
-            options=["倒推算税", "不算税"],
-            index=0,
-            horizontal=True,
-            key="beijian_calc_mode",
-            help="【倒推算税】：保留原有逻辑，将任务金额作为税后实发倒推应发与个税；【不算税】：不扣个税，税金为0，实发与应发完全一致。"
-        )
+    # ================= 专属高颜值：结算核算模式与交付规格卡片 =================
+    st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+    _, col_deck, _ = st.columns([1, 1.8, 1])
+    with col_deck:
+        with st.container(border=True):
+            st.markdown("""
+            <div class="settle-deck-header">
+                <div class="settle-deck-title">
+                    <span style="font-size: 1.15rem;">⚖️</span>
+                    <span>核算模式与计税规格</span>
+                </div>
+                <span class="settle-deck-badge">自由切换 · 自动关联输出表名</span>
+            </div>
+            """, unsafe_allow_html=True)
 
-    # 开始生成大按钮（与其它板块完全一致采用居中标准宽度）
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    _, col_btn, _ = st.columns([1, 1.8, 1])
-    with col_btn:
+            beijian_mode_choice = st.radio(
+                "结算核算模式选择：",
+                options=["🧮 倒推算税（反算税前）", "⚡ 不算税（实发=应发）"],
+                index=0,
+                horizontal=True,
+                key="beijian_calc_mode",
+                label_visibility="collapsed"
+            )
+
+            is_notax = "不算税" in beijian_mode_choice
+            beijian_mode = "不算税" if is_notax else "倒推算税"
+
+            if is_notax:
+                st.markdown("""
+                <div class="mode-spec-callout mode-spec-notax">
+                    <div style="display: flex; align-items: center; justify-content: space-between; font-weight: 700;">
+                        <span>⚡ 当前生效：不算税模式（免税直发）</span>
+                        <span style="font-size: 0.78rem; background: rgba(16, 185, 129, 0.15); padding: 2px 8px; border-radius: 6px;">交付文件：不算税-日期.xlsx</span>
+                    </div>
+                    <div style="font-size: 0.83rem; opacity: 0.9; margin-top: 4px;">
+                        • 任务金额直接作为税前与税后全额实发，税金强制为 <b>¥ 0.00</b> 元（应发金额 = 实发金额）<br>
+                        • 适用于免税类劳务报销、已独立完税或由专家本人自主综合所得年度汇算申报
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="mode-spec-callout mode-spec-tax">
+                    <div style="display: flex; align-items: center; justify-content: space-between; font-weight: 700;">
+                        <span>🧮 当前生效：倒推算税模式（税后反推税前）</span>
+                        <span style="font-size: 0.78rem; background: rgba(2, 132, 199, 0.15); padding: 2px 8px; border-radius: 6px;">交付文件：算税-日期.xlsx</span>
+                    </div>
+                    <div style="font-size: 0.83rem; opacity: 0.9; margin-top: 4px;">
+                        • 任务金额视为<b>税后实发</b>，系统依劳务报酬标准分级反算税前应发并自动代扣税金<br>
+                        • 适用于主办方按税后实付承诺结算，税金由项目方代扣承担
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
         btn_start_beijian = st.button(
-            f"开始生成：{MODULE_BEIJIAN}（{beijian_mode}）",
+            f"🚀 开始生成：{MODULE_BEIJIAN}（{beijian_mode}）",
             type="primary",
             use_container_width=True
         )
