@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
-北检 & 康恩贝结算表生成引擎 (Beijian & CONBA Settlement Engine)
+北检 & 康恩贝结算表生成引擎 - 不算税模式 (Beijian & CONBA Settlement Engine)
 =============================================================================
 功能说明：
-1. 接收 3 张核心源表：
+1. 模式：不算税（任务金额直接作为应发与实发金额，不计扣个税，税金为 0.00 元）
+2. 接收 3 张核心源表：
    - 1.xlsx (待结算词条编号名单)
    - 2.xlsx (专家银行卡与身份资质表)
    - 3.xlsx (语料库全量审核明细表)
-2. 关联匹配与规范化输出 3 张标准化交付表单：
-   - 7_专家劳务报酬明细表.xlsx (基于 4.xlsx 模板格式，内置劳务报酬个税精准反算公式与银行信息)
-   - 8_语料词条明细表.xlsx (基于 5.xlsx 模板格式，按结算单价标记结算状态并保留原始题目/回答记录)
-   - 9_项目作品结算表.xlsx (基于 6.xlsx 模板格式，作品维度单价与乘法关联核算)
+3. 关联匹配与规范化输出 3 张标准化交付表单：
+   - 不算税-YYYY-MM-DD.xlsx (基于 4.xlsx 模板格式，应发与实发一致，税金 0)
+   - 8_已结算语料词条明细表.xlsx (基于 5.xlsx 模板格式，按结算单价标记结算状态并保留原始题目/回答记录)
+   - 9_作品劳务结算总表.xlsx (基于 6.xlsx 模板格式，作品维度单价与乘法关联核算)
 =============================================================================
 """
 
@@ -46,23 +47,18 @@ def find_col(df, candidates, default=None):
                 return c
     return default
 
-def calculate_tax(net_pay):
+def calculate_tax(amount):
     """
-    根据实发劳务报酬计算应发金额与代扣个人所得税 (税后反算税前)
-    规则：
-    1. 实发 <= 800: 无税，应发 = 实发
-    2. 800 < 实发 <= 3360: 应发 = (实发 - 160) / 0.8, 税金 = 应发 - 实发
-    3. 实发 > 3360: 应发 = 实发 / 0.84, 税金 = 应发 - 实发
+    不算税模式：
+    任务金额全部为应发与实发，不计扣税金
+    应发金额 = 任务金额
+    税金 = 0.0
+    实发金额 = 任务金额
     """
-    if net_pay <= 800:
-        tax = 0.0
-        gross_pay = float(net_pay)
-    elif net_pay <= 3360:
-        gross_pay = round((net_pay - 160) / 0.8, 2)
-        tax = round(gross_pay - net_pay, 2)
-    else:
-        gross_pay = round(net_pay / 0.84, 2)
-        tax = round(gross_pay - net_pay, 2)
+    amt = round(float(amount), 2)
+    gross_pay = amt
+    tax = 0.0
+    net_pay = amt
     return gross_pay, tax
 
 def process_beijian_kangbei(
@@ -78,12 +74,12 @@ def process_beijian_kangbei(
     log_func=print
 ):
     """
-    北检 & 康恩贝结算表完整处理主函数
+    北检 & 康恩贝结算表完整处理主函数 (不算税模式)
     """
     if log_func is None:
         log_func = print
 
-    log_func("[提示] 启动北检&康恩贝结算表生成流水线...")
+    log_func("[提示] 启动北检&康恩贝结算表生成流水线（模式：不算税）...")
     os.makedirs(output_dir, exist_ok=True)
 
     # 1. 采用 100% 纯原生 Python 动态生成规范化交付报表，零外部 Excel 模板依赖
@@ -98,36 +94,24 @@ def process_beijian_kangbei(
     # 动态匹配关键字段
     col_id_1 = find_col(df1, ['语料词条编号', '语料编号', '词条编号', '编号'], default='语料词条编号')
     col_id_3 = find_col(df3, ['语料词条编号', '语料编号', '词条编号', '编号'], default='语料词条编号')
-    col_status_3 = find_col(df3, ['结算状态', '状态'], default='结算状态')
 
-    if col_id_1 not in df1.columns:
-        raise ValueError(f"1. 待结算表中未找到词条编号列，当前列包含: {df1.columns.tolist()}")
-    if col_id_3 not in df3.columns:
-        raise ValueError(f"3. 语料明细表中未找到词条编号列，当前列包含: {df3.columns.tolist()}")
+    if not col_id_1 or not col_id_3:
+        raise ValueError(f"无法识别核心编号列：1.xlsx 识别为 {col_id_1}，3.xlsx 识别为 {col_id_3}")
 
-    # 确定目标词条编号范围
-    if include_all_133:
-        target_ids = list(df1[col_id_1].dropna().astype(str).str.strip())
-        log_func(f"[锁定] 采用全量模式：以 1.xlsx 待结算表为准，共锁定 {len(target_ids)} 条目标词条")
+    target_ids = set(df1[col_id_1].dropna().astype(str).str.strip())
+    log_func(f"[信息] 1. 待结算词条名单中有效编号数: {len(target_ids)} 条")
+
+    # 3. 筛选出 3.xlsx 中匹配记录
+    status_col_3 = find_col(df3, ['结算状态', '状态', '审核状态'])
+    if include_all_133 or not status_col_3:
+        df3_filtered = df3[df3[col_id_3].astype(str).str.strip().isin(target_ids)].copy()
+        log_func(f"[匹配] 全量模式：以 1.xlsx 词条编号为准匹配出 {len(df3_filtered)} 条记录")
     else:
-        if col_status_3 in df3.columns:
-            target_ids = list(df3[df3[col_status_3].astype(str).str.strip() == '已加入结算单'][col_id_3].dropna().astype(str).str.strip())
-            log_func(f"[锁定] 采用状态过滤模式：仅提取结算状态为'已加入结算单'的词条，共锁定 {len(target_ids)} 条")
-        else:
-            target_ids = list(df1[col_id_1].dropna().astype(str).str.strip())
-            log_func(f"[警告] 3.xlsx 中未发现结算状态列，自动回退为按 1.xlsx 全量锁定 {len(target_ids)} 条词条")
-
-    # 3. 筛选并按 3.xlsx 出现顺序保留词条记录
-    df3_copy = df3.copy()
-    df3_copy['clean_id'] = df3_copy[col_id_3].astype(str).str.strip()
-    df3_filtered = df3_copy[df3_copy['clean_id'].isin(target_ids)].copy()
-
-    # 保持原始出现顺序
-    original_id_order = df3_copy['clean_id'].tolist()
-    df3_filtered['sort_order'] = df3_filtered['clean_id'].map(lambda x: original_id_order.index(x) if x in original_id_order else 999999)
-    df3_filtered = df3_filtered.sort_values('sort_order').drop(columns=['sort_order', 'clean_id'])
-
-    log_func(f"[匹配] 语料明细总库成功匹配到 {len(df3_filtered)} 条待结算数据")
+        df3_filtered = df3[
+            df3[col_id_3].astype(str).str.strip().isin(target_ids) &
+            (df3[status_col_3].astype(str).str.strip() == '已加入结算单')
+        ].copy()
+        log_func(f"[匹配] 状态过滤模式：匹配到结算状态为「已加入结算单」记录 {len(df3_filtered)} 条")
 
     # 动态抓取每条语料的结算单价（直接从源文件 3.xlsx 或 1.xlsx 提取，兜底 100）
     col_price_3 = find_col(df3, ['结算单价', '单篇单价', '单价', '费用'])
@@ -277,9 +261,9 @@ def process_beijian_kangbei(
     log_func(f"[完成] 9. 项目作品结算表生成成功 (共 {len(df3_filtered)} 项作品)")
 
     # =========================================================================
-    # 生成表 7: 医生专家劳务明细表
+    # 生成表 7: 医生专家劳务明细表 (不算税模式)
     # =========================================================================
-    log_func("[生成] 正在生成【7. 专家劳务报酬明细表】...")
+    log_func("[生成] 正在生成【7. 专家劳务报酬明细表】(不算税模式)...")
     wb7 = openpyxl.Workbook()
     ws7 = wb7.active
     ws7.title = "劳务明细表"
@@ -295,10 +279,10 @@ def process_beijian_kangbei(
     c1.font = Font(name="宋体", size=12, bold=True)
     c1.alignment = Alignment(horizontal="left", vertical="center")
 
-    # 行2：说明文字
+    # 行2：说明文字 (不算税说明)
     ws7.merge_cells("A2:J2")
     ws7.row_dimensions[2].height = 36
-    c2 = ws7.cell(2, 1, "1、下列表格为设置好的核算公式格式，请勿随意修改设置好的公式。\n2、填写信息时，只需填写各专家的劳务信息及最后一项“实发金额”，其他表格则自动计算应发金额及税金。")
+    c2 = ws7.cell(2, 1, "1、本表为不算税（免税/不计税）劳务报酬明细表，请勿随意修改设置好的公式。\n2、应发金额与实发金额完全一致，税金为 0.00 元。")
     c2.font = Font(name="宋体", size=11)
     c2.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
@@ -315,11 +299,10 @@ def process_beijian_kangbei(
         cell.alignment = center_align
         cell.border = thin_border
 
-    # 构建专家银行信息索引 (支持 openpyxl 精确文本避免卡号科学计数法)
+    # 构建专家银行信息索引
     wb2 = openpyxl.load_workbook(file_2, data_only=True)
     ws2 = wb2.active
 
-    # 动态匹配 2.xlsx 表头列
     header_row_2 = [str(ws2.cell(1, c).value or '').strip() for c in range(1, ws2.max_column + 1)]
     col_idx_id2 = None
     col_idx_bank = None
@@ -336,7 +319,6 @@ def process_beijian_kangbei(
         elif any(k in hname for k in ['支行名称', '支行', '开户支行']):
             col_idx_branch = idx
 
-    # 兜底默认列
     col_idx_id2 = col_idx_id2 or 6
     col_idx_card = col_idx_card or 7
     col_idx_bank = col_idx_bank or 8
@@ -364,7 +346,7 @@ def process_beijian_kangbei(
 
     doc_counts = df3_filtered.groupby([doc_name_col, id_card_col, hosp_col, dept_col, title_col_doc], sort=False).agg(
         count=(col_id_3, 'count'),
-        net_pay=('结算单价', 'sum'),
+        pay_amt=('结算单价', 'sum'),
         phone=(phone_col, 'first')
     ).reset_index()
 
@@ -390,9 +372,10 @@ def process_beijian_kangbei(
         card = binfo.get('card', '')
         branch = binfo.get('branch', '')
 
-        # 实发金额直接来自源文件抓取的结算单价汇总，并进行合规个税反算
-        net_pay = float(rdata['net_pay'])
-        gross_pay, tax = calculate_tax(net_pay)
+        # 不算税模式：实发金额 = 应发金额 = 任务单价累计，税金为 0
+        pay_amt = float(rdata['pay_amt'])
+        gross_pay, tax = calculate_tax(pay_amt)
+        net_pay = gross_pay
 
         total_net_all += net_pay
         total_tax_all += tax
@@ -423,7 +406,7 @@ def process_beijian_kangbei(
                 cell.number_format = '@'
 
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    final_filename = f"算税-{today_str}.xlsx"
+    final_filename = f"不算税-{today_str}.xlsx"
     out_path_final = os.path.join(output_dir, final_filename)
     wb7.save(out_path_final)
     out_path_7 = os.path.join(output_dir, "7_专家劳务报酬明细表.xlsx")
@@ -436,12 +419,12 @@ def process_beijian_kangbei(
 
     return {
         "success": True,
-        "mode": "倒推算税",
+        "mode": "不算税",
         "final_table_name": final_filename,
         "total_items": len(df3_filtered),
         "total_doctors": len(doc_counts),
         "total_net": round(total_net_all, 2),
-        "total_tax": round(total_tax_all, 2),
+        "total_tax": 0.0,
         "total_gross": round(total_gross_all, 2),
         "files": {
             final_filename: out_path_final,
@@ -455,7 +438,7 @@ def process_beijian_kangbei(
     }
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="北检&康恩贝结算表生成器")
+    parser = argparse.ArgumentParser(description="北检&康恩贝结算表生成器 (不算税模式)")
     parser.add_argument("-1", "--file1", default="1.xlsx", help="1.xlsx 待结算词条名单")
     parser.add_argument("-2", "--file2", default="2.xlsx", help="2.xlsx 专家银行卡信息")
     parser.add_argument("-3", "--file3", default="3.xlsx", help="3.xlsx 语料库明细数据")
@@ -478,4 +461,4 @@ if __name__ == '__main__':
         include_all_133=not args.filtered_only,
         price_per_item=args.price
     )
-    print(f"\n处理结果: 词条数: {res['total_items']}, 医生数: {res['total_doctors']}, 实发总额: ¥{res['total_net']}")
+    print("处理结果:", res)
