@@ -1060,7 +1060,7 @@ if not st.session_state["authenticated"]:
 # 业务功能定义
 # -------------------------------------------------------------
 MODULE_SHANGYAO = "上药雷允上进度表"
-MODULE_CORPUS = "语料库电签信息表"
+MODULE_CORPUS = "康恩贝语料库电签表"
 MODULE_ZHENGHE = "北京整合-上药雷允上结算包"
 MODULE_JUMEI = "陈菊梅基金会-雷允上结算包"
 MODULE_SAAS = "老Saas医院导入模板"
@@ -1556,7 +1556,7 @@ print("SUCCESS_OUT2:" + str(out2))
 
 
 # =============================================================
-# 模块二：语料库电签信息表
+# 模块二：康恩贝语料库电签表
 # =============================================================
 elif current_module == MODULE_CORPUS:
     render_html(f"""
@@ -1567,7 +1567,7 @@ elif current_module == MODULE_CORPUS:
             </div>
             <div>
                 <div class="ios-hero-title">{MODULE_CORPUS}</div>
-                <div class="ios-hero-subtitle">智能嗅探 3 张关键表格，自动完成实发清单、银行发放表与对账明细的端到端核验。</div>
+                <div class="ios-hero-subtitle">智能嗅探 3 张关键表格，自动完成实发清单、银行发放表与对账明细的端到端核验。<br>更新内容：生成表单增加项目名称，税前正算扣税逻辑，最终生成的文件名称为：康恩贝语料库电签表-生成日期</div>
             </div>
         </div>
         <div class="ios-hero-pill">
@@ -1770,11 +1770,12 @@ elif current_module == MODULE_CORPUS:
                             st.code(proc.stdout)
 
                         st.markdown("---")
+                        today_str = get_beijing_now().strftime("%Y-%m-%d")
                         zip_data = create_zip_archive(output_files)
                         st.download_button(
                             label=f"打包下载全部月度结果文件 (ZIP) ({format_size(len(zip_data))})",
                             data=zip_data,
-                            file_name="月度语料结算完整结果包.zip",
+                            file_name=f"康恩贝语料库电签表-{today_str}.zip",
                             mime="application/zip",
                             use_container_width=True
                         )
