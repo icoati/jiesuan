@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-医疗健康语料库 - 每月结算一键生成工具 (工业级高鲁棒性版)
+康恩贝医疗健康语料库 - 每月结算一键生成工具 (工业级高鲁棒性版)
 适用环境：macOS / Windows / Linux (Python 3.8+)
 特点：
 1. 智能多工作表扫描（自动识别真正包含数据的 Sheet，跳过说明/空表）
@@ -195,12 +195,48 @@ def find_col_name(available_cols, alias_key):
             return clean_cols_map[clean_t]
     return None
 
+def extract_quoted_text(text: str) -> str:
+    """
+    如果包含引号（中文“”或英文""或书名号《》），只提取引号内的核心项目名称；
+    若包含多个引号对，取第一个非空引号内容；
+    若不包含引号，则返回去除空白后的原文本。
+    """
+    if text is None or pd.isna(text):
+        return ""
+    s = str(text).strip()
+    if not s or s.lower() in ['nan', 'none', 'null', '空', '-', '无', '/', '\\']:
+        return ""
+    
+    # 1. 优先提取中文双引号 “...” 内的内容
+    m_cn = re.findall(r'“([^”]+)”', s)
+    if m_cn:
+        for cand in m_cn:
+            if cand.strip():
+                return cand.strip()
+                
+    # 2. 提取英文双引号 "..." 内的内容
+    m_en = re.findall(r'"([^"]+)"', s)
+    if m_en:
+        for cand in m_en:
+            if cand.strip():
+                return cand.strip()
+                
+    # 3. 提取书名号《...》或单引号「...」内的内容
+    m_bk = re.findall(r'[《「]([^》」]+)[》」]', s)
+    if m_bk:
+        for cand in m_bk:
+            if cand.strip():
+                return cand.strip()
+
+    return s
+
 def extract_top_activity_name(activity_list, default_name=""):
     """
     从活动/项目名称列表中，统计出现频次最高的单个活动名称：
     1. 若单元格包含多个活动名称（通过逗号、分号、换行、顿号、斜杠、竖线等分隔），拆分为单独活动计入频次；
-    2. 忽略空白、nan/none/null/空/-等无意义值；
-    3. 统计各活动名称频次，返回出现频次最高的那一个；若无则返回 default_name。
+    2. 只取引号“”内的核心项目名称；
+    3. 忽略空白、nan/none/null/空/-等无意义值；
+    4. 统计各活动名称频次，返回出现频次最高的那一个；若无则返回 default_name。
     """
     from collections import Counter
     counts = Counter()
@@ -212,9 +248,11 @@ def extract_top_activity_name(activity_list, default_name=""):
             continue
         items = [x.strip() for x in re.split(r'[,，、;；\n|/]+', s) if x.strip()]
         for item in items:
-            counts[item] += 1
+            q_text = extract_quoted_text(item)
+            if q_text:
+                counts[q_text] += 1
     if not counts:
-        return default_name
+        return extract_quoted_text(default_name)
     return counts.most_common(1)[0][0]
 
 def find_project_column(columns):
@@ -243,7 +281,7 @@ def find_project_column(columns):
     return None
 
 def get_valid_project_values(values_iterable):
-    """提取非空、非nan且有实际意义的项目/活动名称列表"""
+    """提取非空、非nan且有实际意义的项目/活动名称列表（若包含引号则只取引号内核心内容）"""
     valid = []
     for val in values_iterable:
         if val is None or pd.isna(val):
@@ -251,7 +289,9 @@ def get_valid_project_values(values_iterable):
         s = str(val).strip()
         if not s or s.lower() in ['nan', 'none', 'null', '空', '-', '无', '/', '\\']:
             continue
-        valid.append(s)
+        cleaned = extract_quoted_text(s)
+        if cleaned:
+            valid.append(cleaned)
     return valid
 
 # ==================== 3. 智能多工作表检测与加载 ====================
@@ -304,6 +344,7 @@ def detect_input_files(target_dir):
         f for f in all_files
         if not os.path.basename(f).startswith("~$")
         and not os.path.basename(f).startswith("最终")
+        and not os.path.basename(f).startswith("康恩贝语料库电签表")
         and "结算筛选" not in os.path.basename(f)
         and "对账" not in os.path.basename(f)
     ]
@@ -343,7 +384,7 @@ def detect_input_files(target_dir):
 # ==================== 5. 核心处理主程序 ====================
 def process_settlement(target_dir="."):
     print("=" * 65)
-    print("   🏥 医疗健康语料库 - 每月结算自动生成工具 (Mac/Win 通用)")
+    print("   🏥 康恩贝医疗健康语料库 - 每月结算自动生成工具 (Mac/Win 通用)")
     print("=" * 65)
     print(f"📁 工作文件夹: {os.path.abspath(target_dir)}")
     
@@ -542,6 +583,7 @@ def process_settlement(target_dir="."):
 
     if candidate_acts:
         top_proj_name = extract_top_activity_name(candidate_acts, default_name="")
+    top_proj_name = extract_quoted_text(top_proj_name)
 
     if top_proj_name:
         print(f"  ✔ 自动识别项目名称: [{top_proj_name}] (来源: {source_desc}，按最高频次规则统计)")
@@ -601,12 +643,12 @@ def process_settlement(target_dir="."):
         prov, city = parse_hospital_location(hosp)
 
         # 医生所属项目名称判定：
-        # 1. 优先取该医生在用户列表中的个人参与项目/活动
+        # 1. 优先取该医生在用户列表中的个人参与项目/活动（只取“”内的内容）
         doc_proj = ""
         if u_proj_col and u_info.get(u_proj_col):
             raw_p = str(u_info.get(u_proj_col)).strip()
             if raw_p and raw_p.lower() not in ['nan', 'none', 'null', '空', '-', '无']:
-                doc_proj = extract_top_activity_name([raw_p], default_name=raw_p)
+                doc_proj = extract_quoted_text(raw_p)
         
         # 2. 若用户列表无，且当前语料中有该医生的项目名称，取语料中的项目名称
         if not doc_proj and c_proj_col and c_proj_col in grp.columns:
@@ -617,6 +659,8 @@ def process_settlement(target_dir="."):
         # 3. 若仍无，则回退到全批次统计出的最高频项目名称
         if not doc_proj:
             doc_proj = top_proj_name
+
+        doc_proj = extract_quoted_text(doc_proj)
         
         doctor_summary_list.append({
             '姓名*': name,
@@ -710,11 +754,12 @@ def process_settlement(target_dir="."):
         max_l = max(sum(2 if ord(ch) > 127 else 1 for ch in str(cell.value or '')) for cell in col)
         ws_final.column_dimensions[col_letter].width = min(max(max_l + 4, 12), 40)
         
-    out_final_xlsx = os.path.join(target_dir, "最终.xlsx")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    out_final_xlsx = os.path.join(target_dir, f"康恩贝语料库电签表-{today_str}.xlsx")
     wb_final.save(out_final_xlsx)
     
-    # 2. 最终.xls (标准 BIFF8)
-    out_final_xls = os.path.join(target_dir, "最终.xls")
+    # 2. 康恩贝语料库电签表-{today_str}.xls (标准 BIFF8)
+    out_final_xls = os.path.join(target_dir, f"康恩贝语料库电签表-{today_str}.xls")
     if xlwt:
         wb_xls = xlwt.Workbook(encoding='utf-8')
         ws_xls = wb_xls.add_sheet('Sheet0')
