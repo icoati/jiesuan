@@ -175,22 +175,73 @@ def format_bank_and_branch(bank_val, branch_val):
 
 
 def read_source_df(source):
-    """安全读取源数据 DataFrame (支持路径、bytes、BytesIO)"""
+    """安全读取源数据 DataFrame (支持路径、bytes、BytesIO、Excel 及 CSV，自动探测编码)"""
     if isinstance(source, pd.DataFrame):
         return source.copy()
-    elif isinstance(source, bytes):
-        return pd.read_excel(io.BytesIO(source))
+    
+    def parse_data_content(content_bytes=None, file_path=None):
+        for engine in ['openpyxl', 'xlrd']:
+            try:
+                if content_bytes is not None:
+                    return pd.read_excel(io.BytesIO(content_bytes), engine=engine)
+                elif file_path is not None and not str(file_path).lower().endswith('.csv'):
+                    return pd.read_excel(file_path, engine=engine)
+            except Exception:
+                pass
+        for enc in ['utf-8-sig', 'gbk', 'utf-8']:
+            try:
+                if content_bytes is not None:
+                    return pd.read_csv(io.BytesIO(content_bytes), encoding=enc)
+                elif file_path is not None:
+                    return pd.read_csv(file_path, encoding=enc)
+            except Exception:
+                pass
+        return None
+
+    if isinstance(source, bytes):
+        res = parse_data_content(content_bytes=source)
+        if res is not None:
+            return res
+        raise ValueError("无法解析该字节流数据为 Excel 或 CSV 表格")
     elif hasattr(source, 'read'):
         if hasattr(source, 'seek'):
             source.seek(0)
         content = source.read()
         if hasattr(source, 'seek'):
             source.seek(0)
-        return pd.read_excel(io.BytesIO(content))
+        if isinstance(content, str):
+            content = content.encode('utf-8')
+        res = parse_data_content(content_bytes=content)
+        if res is not None:
+            return res
+        raise ValueError("无法解析该文件流数据为 Excel 或 CSV 表格")
     elif isinstance(source, (str, os.PathLike)):
-        return pd.read_excel(source)
+        res = parse_data_content(file_path=source)
+        if res is not None:
+            return res
+        raise ValueError(f"无法读取文件: {source}")
     else:
         raise ValueError(f"无法解析的数据源类型: {type(source)}")
+
+
+def ensure_header_detected(df, target_keywords, max_scan_rows=8):
+    """智能表头自适应：扫描前 max_scan_rows 行发现表头行时自动提升为 DataFrame 列名"""
+    if df is None or df.empty:
+        return df
+
+    cols_clean = [re.sub(r'[\s\(\)（）_\ufeff]+', '', str(c)) for c in df.columns]
+    if any(any(kw in c for kw in target_keywords) for c in cols_clean):
+        return df
+
+    for r_idx in range(min(max_scan_rows, len(df))):
+        row_vals = [re.sub(r'[\s\(\)（）_\ufeff]+', '', str(v)) for v in df.iloc[r_idx] if pd.notna(v)]
+        if any(any(kw in v for kw in target_keywords) for v in row_vals):
+            new_df = df.iloc[r_idx + 1:].copy()
+            new_df.columns = [str(x).strip() if pd.notna(x) else f"Unnamed_{i}" for i, x in enumerate(df.iloc[r_idx].values)]
+            new_df.reset_index(drop=True, inplace=True)
+            return new_df
+
+    return df
 
 
 def generate_dianping_sign_workbook(task_source, detail_source, user_source, output_target=None):
@@ -206,15 +257,16 @@ def generate_dianping_sign_workbook(task_source, detail_source, user_source, out
     df_details = read_source_df(detail_source)
     df_users = read_source_df(user_source)
 
-    # 1. 动态嗅探任务编号列 (防踩坑：列位置变动 + set集合去重)
+    # 1. 动态嗅探任务编号列 (表头自适应 + 任务明细编号最高优先级)
+    df_tasks = ensure_header_detected(df_tasks, ['任务明细编号', '点评编码', '任务编号', '作品编号', '编号'])
     task_id_col = find_column_by_candidates(df_tasks.columns, ['任务明细编号', '点评编码', '任务编号', '作品编号', '编号'])
     if not task_id_col:
         task_id_col = df_tasks.columns[0]
 
     raw_task_ids = df_tasks[task_id_col].dropna().astype(str).str.strip().tolist()
-    target_task_ids = set(x for x in raw_task_ids if x)
+    target_task_ids = set(x for x in raw_task_ids if x and x.lower() not in ['nan', 'none', 'null'])
     if not target_task_ids:
-        raise ValueError("【任务编号表】中未能解析出任何有效的任务明细编号！")
+        raise ValueError(f"【任务编号表】的「{task_id_col}」列中未能解析出任何有效的任务明细编号！")
 
     # 2. 动态嗅探明细表中勾稽列 (防踩坑：优先匹配【点评编码】，防误连作品编码)
     detail_code_col = find_column_by_candidates(df_details.columns, ['点评编码', '任务明细编号', '点评编号'])

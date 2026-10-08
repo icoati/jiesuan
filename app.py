@@ -3164,62 +3164,131 @@ elif current_module == MODULE_KOPU:
     """)
 
     uploaded_kopu_files = st.file_uploader(
-        "拖拽或批量选择上传源表格 (.xlsx / .xls，支持同时选择上传 3 个文件)",
-        type=["xlsx", "xls"],
+        "拖拽或批量选择上传源表格 (.xlsx / .xls / .csv，支持同时选择上传 3 个文件)",
+        type=["xlsx", "xls", "csv"],
         accept_multiple_files=True,
         key="upload_kopu"
     )
 
-    # 智能实时预识别嗅探
+    # 智能实时预识别嗅探（内容/表头特征优先探测，杜绝文件名误判）
     task_file_obj, detail_file_obj, user_file_obj = None, None, None
+    task_match_note, detail_match_note, user_match_note = "", "", ""
+
     if uploaded_kopu_files:
-        # 第一轮：按文件名强特征优先匹配
+        parsed_kopu_list = []
         for uf in uploaded_kopu_files:
-            fname = uf.name.lower()
-            if any(k in fname for k in ['任务编号', '任务明细', '任务', 'task']):
-                if not task_file_obj:
-                    task_file_obj = uf
-            elif any(k in fname for k in ['明细表', '明细', '作品', '点评', '参与', 'detail']):
-                if not detail_file_obj:
-                    detail_file_obj = uf
-            elif any(k in fname for k in ['用户信息', '用户', '专家', '结算数据', '结算', 'user', 'info']):
-                if not user_file_obj:
-                    user_file_obj = uf
+            raw_content = uf.getvalue()
+            df_peek = pd.DataFrame()
+            # 优先尝试 Excel 引擎
+            for engine in ['openpyxl', 'xlrd']:
+                try:
+                    df_peek = pd.read_excel(io.BytesIO(raw_content), nrows=8, engine=engine)
+                    break
+                except Exception:
+                    pass
+            # 降级尝试 CSV (覆盖 utf-8-sig, gbk, utf-8)
+            if df_peek.empty:
+                for enc in ['utf-8-sig', 'gbk', 'utf-8']:
+                    try:
+                        df_peek = pd.read_csv(io.BytesIO(raw_content), nrows=8, encoding=enc)
+                        break
+                    except Exception:
+                        pass
 
-        # 第二轮：表头特征智能探测
-        for uf in uploaded_kopu_files:
-            if uf in [task_file_obj, detail_file_obj, user_file_obj]:
+            # 抓取列名与前 5 行文本特征
+            tokens = []
+            if not df_peek.empty:
+                tokens.extend([re.sub(r'[\s\(\)（）_\ufeff]+', '', str(c)) for c in df_peek.columns])
+                for r_idx in range(min(5, len(df_peek))):
+                    tokens.extend([re.sub(r'[\s\(\)（）_\ufeff]+', '', str(v)) for v in df_peek.iloc[r_idx] if pd.notna(v)])
+            text_summary = ' '.join(tokens)
+            parsed_kopu_list.append({
+                'obj': uf,
+                'name': uf.name,
+                'text': text_summary,
+                'cols': [re.sub(r'[\s\(\)（）_\ufeff]+', '', str(c)) for c in df_peek.columns] if not df_peek.empty else []
+            })
+
+        # 第 1 轮：表头核心特征高置信度嗅探
+        # 1. 优先识别 专家用户信息表 (具有银行卡号/开户行/支行名称/结算账号独占特征)
+        for item in parsed_kopu_list:
+            if not user_file_obj:
+                if any(k in item['text'] for k in ['银行卡号', '开户行', '支行名称', '电签银行卡号', '结算账号', '银行账号']):
+                    hit = next((k for k in ['银行卡号', '开户行', '支行名称', '电签银行卡号', '结算账号', '银行账号'] if k in item['text']), '银行资质')
+                    user_file_obj = item['obj']
+                    user_match_note = f"识别到【{hit}】"
+
+        # 2. 优先识别 科普视频明细表 (具有科普课件/课件链接/视频链接，或用户名称+积分/作品编号特征)
+        for item in parsed_kopu_list:
+            if item['obj'] == user_file_obj:
                 continue
-            try:
-                df_peek = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=2)
-                h_str = "".join([str(c) for c in df_peek.columns])
-                if not task_file_obj and ("任务明细编号" in h_str or "任务编号" in h_str or "点评编码" in h_str):
-                    task_file_obj = uf
-                elif not detail_file_obj and ("作品编号" in h_str or "科普课件" in h_str or "课件链接" in h_str or "作品编码" in h_str or "点评编码" in h_str or "点评内容" in h_str):
-                    detail_file_obj = uf
-                elif not user_file_obj and ("银行卡号" in h_str or "开户行" in h_str or "支行名称" in h_str or "电签银行卡号" in h_str):
-                    user_file_obj = uf
-            except Exception:
-                pass
+            if not detail_file_obj:
+                if any(k in item['text'] for k in ['科普课件', '课件链接', '视频链接', '课件名称']):
+                    detail_file_obj = item['obj']
+                    detail_match_note = "识别到【科普课件/课件链接】"
+                elif '用户名称' in item['text'] and any(k in item['text'] for k in ['积分', '作品编号', '作品编码']):
+                    detail_file_obj = item['obj']
+                    detail_match_note = "识别到【用户名称+积分/作品】"
 
-        # 渲染识别状态指示条（与规范样式完全一致的药丸卡片）
+        # 3. 优先识别 待结算任务编号表 (核心包含 任务明细编号、华东项目结算单号、国康结算单号、任务编号、点评编码)
+        for item in parsed_kopu_list:
+            if item['obj'] in [user_file_obj, detail_file_obj]:
+                continue
+            if not task_file_obj:
+                if any(k in item['text'] for k in ['任务明细编号', '华东项目结算单号', '国康结算单号', '任务编号', '点评编码']):
+                    hit = next((k for k in ['任务明细编号', '华东项目结算单号', '国康结算单号', '任务编号', '点评编码'] if k in item['text']), '任务编号')
+                    task_file_obj = item['obj']
+                    task_match_note = f"识别到列【{hit}】"
+
+        # 第 2 轮：按文件名特征补齐未识别项
+        for item in parsed_kopu_list:
+            if item['obj'] in [task_file_obj, detail_file_obj, user_file_obj]:
+                continue
+            f_lower = item['name'].lower()
+            if not task_file_obj and any(k in f_lower for k in ['任务编号', '任务明细', '待结算', 'task', 'kp']):
+                task_file_obj = item['obj']
+                task_match_note = "文件名匹配【任务】"
+            elif not detail_file_obj and any(k in f_lower for k in ['明细表', '明细', '作品', '视频', '课件', 'detail', '参与']):
+                detail_file_obj = item['obj']
+                detail_match_note = "文件名匹配【明细/视频】"
+            elif not user_file_obj and any(k in f_lower for k in ['用户信息', '用户', '专家', '银行', 'user', 'info']):
+                user_file_obj = item['obj']
+                user_match_note = "文件名匹配【用户/专家】"
+
+        # 第 3 轮：单槽位孤儿自动兜底
+        unassigned_kopu = [item['obj'] for item in parsed_kopu_list if item['obj'] not in [task_file_obj, detail_file_obj, user_file_obj]]
+        if len(unassigned_kopu) == 1:
+            if not task_file_obj:
+                task_file_obj = unassigned_kopu[0]
+                task_match_note = "自适应匹配待结算表"
+            elif not detail_file_obj:
+                detail_file_obj = unassigned_kopu[0]
+                detail_match_note = "自适应匹配视频明细"
+            elif not user_file_obj:
+                user_file_obj = unassigned_kopu[0]
+                user_match_note = "自适应匹配用户信息"
+
+        # 渲染识别状态指示条（展示智能命中的字段提示）
         render_html('<div class="ios-precheck-box"><b>智能多表嗅探识别状态：</b><br>')
         chk_cols = st.columns(3)
         with chk_cols[0]:
             if task_file_obj:
-                render_html(f'<span class="ios-badge-success">1. 待结算任务编号表：已锁定</span><br><small style="opacity:0.8;">{task_file_obj.name}</small>', container=chk_cols[0])
+                note_str = f" · <span style='color:#16a34a;font-weight:600;'>{task_match_note}</span>" if task_match_note else ""
+                render_html(f'<span class="ios-badge-success">1. 待结算任务编号表：已锁定{note_str}</span><br><small style="opacity:0.8;">{task_file_obj.name}</small>', container=chk_cols[0])
             else:
-                render_html('<span class="ios-badge-pending">待识别：1. 待结算任务编号表 (任务/编号)</span>', container=chk_cols[0])
+                render_html('<span class="ios-badge-pending">待识别：1. 待结算任务编号表 (任务明细编号)</span>', container=chk_cols[0])
         with chk_cols[1]:
             if detail_file_obj:
-                render_html(f'<span class="ios-badge-success">2. 科普视频明细表：已锁定</span><br><small style="opacity:0.8;">{detail_file_obj.name}</small>', container=chk_cols[1])
+                note_str = f" · <span style='color:#16a34a;font-weight:600;'>{detail_match_note}</span>" if detail_match_note else ""
+                render_html(f'<span class="ios-badge-success">2. 科普视频明细表：已锁定{note_str}</span><br><small style="opacity:0.8;">{detail_file_obj.name}</small>', container=chk_cols[1])
             else:
-                render_html('<span class="ios-badge-pending">待识别：2. 科普视频明细表 (明细/视频)</span>', container=chk_cols[1])
+                render_html('<span class="ios-badge-pending">待识别：2. 科普视频明细表 (科普课件/明细)</span>', container=chk_cols[1])
         with chk_cols[2]:
             if user_file_obj:
-                render_html(f'<span class="ios-badge-success">3. 专家用户信息表：已锁定</span><br><small style="opacity:0.8;">{user_file_obj.name}</small>', container=chk_cols[2])
+                note_str = f" · <span style='color:#16a34a;font-weight:600;'>{user_match_note}</span>" if user_match_note else ""
+                render_html(f'<span class="ios-badge-success">3. 专家用户信息表：已锁定{note_str}</span><br><small style="opacity:0.8;">{user_file_obj.name}</small>', container=chk_cols[2])
             else:
-                render_html('<span class="ios-badge-pending">待识别：3. 专家用户信息表 (用户/专家)</span>', container=chk_cols[2])
+                render_html('<span class="ios-badge-pending">待识别：3. 专家用户信息表 (银行卡号)</span>', container=chk_cols[2])
 
         render_html("""
         <div style="margin: 12px 0 16px 0; padding: 12px 18px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 13px; color: #166534; display: flex; align-items: center; justify-content: space-between;">
@@ -3376,62 +3445,128 @@ elif current_module == MODULE_DIANPING:
     """)
 
     uploaded_dp_files = st.file_uploader(
-        "拖拽或批量选择上传源表格 (.xlsx / .xls，支持同时选择上传 3 个文件)",
-        type=["xlsx", "xls"],
+        "拖拽或批量选择上传源表格 (.xlsx / .xls / .csv，支持同时选择上传 3 个文件)",
+        type=["xlsx", "xls", "csv"],
         accept_multiple_files=True,
         key="upload_dianping"
     )
 
-    # 智能实时预识别嗅探
+    # 智能实时预识别嗅探（内容/表头特征优先探测，杜绝文件名误判）
     dp_task_file, dp_detail_file, dp_user_file = None, None, None
-    if uploaded_dp_files:
-        # 第一轮：按文件名强特征优先匹配
-        for uf in uploaded_dp_files:
-            fname = uf.name.lower()
-            if any(k in fname for k in ['任务编号', '任务明细', '任务', 'task']):
-                if not dp_task_file:
-                    dp_task_file = uf
-            elif any(k in fname for k in ['点评-参与', '参与数据', '点评', '参与', '明细']):
-                if not dp_detail_file:
-                    dp_detail_file = uf
-            elif any(k in fname for k in ['结算数据', '用户信息', '用户档案', '结算', '专家', '用户']):
-                if not dp_user_file:
-                    dp_user_file = uf
+    dp_task_match_note, dp_detail_match_note, dp_user_match_note = "", "", ""
 
-        # 第二轮：表头特征智能探测
+    if uploaded_dp_files:
+        parsed_dp_list = []
         for uf in uploaded_dp_files:
-            if uf in [dp_task_file, dp_detail_file, dp_user_file]:
+            raw_content = uf.getvalue()
+            df_peek = pd.DataFrame()
+            for engine in ['openpyxl', 'xlrd']:
+                try:
+                    df_peek = pd.read_excel(io.BytesIO(raw_content), nrows=8, engine=engine)
+                    break
+                except Exception:
+                    pass
+            if df_peek.empty:
+                for enc in ['utf-8-sig', 'gbk', 'utf-8']:
+                    try:
+                        df_peek = pd.read_csv(io.BytesIO(raw_content), nrows=8, encoding=enc)
+                        break
+                    except Exception:
+                        pass
+
+            tokens = []
+            if not df_peek.empty:
+                tokens.extend([re.sub(r'[\s\(\)（）_\ufeff]+', '', str(c)) for c in df_peek.columns])
+                for r_idx in range(min(5, len(df_peek))):
+                    tokens.extend([re.sub(r'[\s\(\)（）_\ufeff]+', '', str(v)) for v in df_peek.iloc[r_idx] if pd.notna(v)])
+            text_summary = ' '.join(tokens)
+            parsed_dp_list.append({
+                'obj': uf,
+                'name': uf.name,
+                'text': text_summary,
+                'cols': [re.sub(r'[\s\(\)（）_\ufeff]+', '', str(c)) for c in df_peek.columns] if not df_peek.empty else []
+            })
+
+        # 第 1 轮：表头特征高置信度嗅探
+        # 1. 优先识别 专家档案结算底表 (独占银行卡号/开户行特征)
+        for item in parsed_dp_list:
+            if not dp_user_file:
+                if any(k in item['text'] for k in ['银行卡号', '开户行', '支行名称', '电签银行卡号', '结算账号']):
+                    hit = next((k for k in ['银行卡号', '开户行', '支行名称', '电签银行卡号', '结算账号'] if k in item['text']), '银行资质')
+                    dp_user_file = item['obj']
+                    dp_user_match_note = f"识别到【{hit}】"
+
+        # 2. 优先识别 专家点评明细表 (具有点评内容/点评编码/专家姓名特征)
+        for item in parsed_dp_list:
+            if item['obj'] == dp_user_file:
                 continue
-            try:
-                df_peek = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=2)
-                h_str = "".join([str(c) for c in df_peek.columns])
-                if not dp_task_file and ("任务明细编号" in h_str or "任务编号" in h_str or "点评编码" in h_str):
-                    dp_task_file = uf
-                elif not dp_detail_file and ("点评编码" in h_str or "点评内容" in h_str or "专家姓名" in h_str or "科普课件" in h_str):
-                    dp_detail_file = uf
-                elif not dp_user_file and ("银行卡号" in h_str or "开户行" in h_str or "支行名称" in h_str):
-                    dp_user_file = uf
-            except Exception:
-                pass
+            if not dp_detail_file:
+                if any(k in item['text'] for k in ['点评内容', '专家点评', '科普课件', '课件链接']):
+                    dp_detail_file = item['obj']
+                    dp_detail_match_note = "识别到【点评内容/课件】"
+                elif any(k in item['text'] for k in ['点评编码', '点评编号']) and any(k in item['text'] for k in ['专家姓名', '用户名称', '积分']):
+                    dp_detail_file = item['obj']
+                    dp_detail_match_note = "识别到【点评编码+专家明细】"
+
+        # 3. 优先识别 待结算任务编号表 (核心包含 任务明细编号、华东项目结算单号、国康结算单号、任务编号、点评编码)
+        for item in parsed_dp_list:
+            if item['obj'] in [dp_user_file, dp_detail_file]:
+                continue
+            if not dp_task_file:
+                if any(k in item['text'] for k in ['任务明细编号', '华东项目结算单号', '国康结算单号', '任务编号', '点评编码']):
+                    hit = next((k for k in ['任务明细编号', '华东项目结算单号', '国康结算单号', '任务编号', '点评编码'] if k in item['text']), '任务编号')
+                    dp_task_file = item['obj']
+                    dp_task_match_note = f"识别到列【{hit}】"
+
+        # 第 2 轮：按文件名特征补齐未识别项
+        for item in parsed_dp_list:
+            if item['obj'] in [dp_task_file, dp_detail_file, dp_user_file]:
+                continue
+            f_lower = item['name'].lower()
+            if not dp_task_file and any(k in f_lower for k in ['任务编号', '任务明细', '待结算', 'task', 'dp']):
+                dp_task_file = item['obj']
+                dp_task_match_note = "文件名匹配【任务】"
+            elif not dp_detail_file and any(k in f_lower for k in ['点评-参与', '参与数据', '点评', '明细', '参与', 'detail']):
+                dp_detail_file = item['obj']
+                dp_detail_match_note = "文件名匹配【点评/明细】"
+            elif not dp_user_file and any(k in f_lower for k in ['结算数据', '用户信息', '用户档案', '专家', '银行', 'user']):
+                dp_user_file = item['obj']
+                dp_user_match_note = "文件名匹配【档案/专家】"
+
+        # 第 3 轮：单槽位孤儿自动兜底
+        unassigned_dp = [item['obj'] for item in parsed_dp_list if item['obj'] not in [dp_task_file, dp_detail_file, dp_user_file]]
+        if len(unassigned_dp) == 1:
+            if not dp_task_file:
+                dp_task_file = unassigned_dp[0]
+                dp_task_match_note = "自适应匹配待结算表"
+            elif not dp_detail_file:
+                dp_detail_file = unassigned_dp[0]
+                dp_detail_match_note = "自适应匹配点评明细"
+            elif not dp_user_file:
+                dp_user_file = unassigned_dp[0]
+                dp_user_match_note = "自适应匹配专家底表"
 
         # 渲染识别状态指示条
         render_html('<div class="ios-precheck-box"><b>智能多表嗅探识别状态：</b><br>')
         chk_cols = st.columns(3)
         with chk_cols[0]:
             if dp_task_file:
-                render_html(f'<span class="ios-badge-success">1. 待结算任务编号表：已锁定</span><br><small style="opacity:0.8;">{dp_task_file.name}</small>', container=chk_cols[0])
+                note_str = f" · <span style='color:#16a34a;font-weight:600;'>{dp_task_match_note}</span>" if dp_task_match_note else ""
+                render_html(f'<span class="ios-badge-success">1. 待结算任务编号表：已锁定{note_str}</span><br><small style="opacity:0.8;">{dp_task_file.name}</small>', container=chk_cols[0])
             else:
-                render_html('<span class="ios-badge-pending">待识别：1. 待结算任务编号表 (任务/编号)</span>', container=chk_cols[0])
+                render_html('<span class="ios-badge-pending">待识别：1. 待结算任务编号表 (任务明细编号)</span>', container=chk_cols[0])
         with chk_cols[1]:
             if dp_detail_file:
-                render_html(f'<span class="ios-badge-success">2. 专家点评明细表：已锁定</span><br><small style="opacity:0.8;">{dp_detail_file.name}</small>', container=chk_cols[1])
+                note_str = f" · <span style='color:#16a34a;font-weight:600;'>{dp_detail_match_note}</span>" if dp_detail_match_note else ""
+                render_html(f'<span class="ios-badge-success">2. 专家点评明细表：已锁定{note_str}</span><br><small style="opacity:0.8;">{dp_detail_file.name}</small>', container=chk_cols[1])
             else:
                 render_html('<span class="ios-badge-pending">待识别：2. 专家点评明细表 (点评/参与)</span>', container=chk_cols[1])
         with chk_cols[2]:
             if dp_user_file:
-                render_html(f'<span class="ios-badge-success">3. 专家档案结算底表：已锁定</span><br><small style="opacity:0.8;">{dp_user_file.name}</small>', container=chk_cols[2])
+                note_str = f" · <span style='color:#16a34a;font-weight:600;'>{dp_user_match_note}</span>" if dp_user_match_note else ""
+                render_html(f'<span class="ios-badge-success">3. 专家档案结算底表：已锁定{note_str}</span><br><small style="opacity:0.8;">{dp_user_file.name}</small>', container=chk_cols[2])
             else:
-                render_html('<span class="ios-badge-pending">待识别：3. 专家档案结算底表 (结算/专家)</span>', container=chk_cols[2])
+                render_html('<span class="ios-badge-pending">待识别：3. 专家档案结算底表 (银行卡号)</span>', container=chk_cols[2])
 
         render_html("""
         <div style="margin: 12px 0 16px 0; padding: 12px 18px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 13px; color: #166534; display: flex; align-items: center; justify-content: space-between;">

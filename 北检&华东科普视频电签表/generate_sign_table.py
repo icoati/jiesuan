@@ -172,50 +172,117 @@ def format_bank_and_branch(bank_val, branch_val):
     # 7. 银行名称 + 支行名称合并
     return b + br
 
-def extract_top_activity_name(activity_list, default_name='健康之舟，医路通行'):
-    """
-    根据规则从【参与活动】列提取出现频次最多的活动名称：
-    1. 逐行读取参与活动内容；
-    2. 若单行包含多个活动（如用顿号 '、'、分号 ';' 或 '；'、换行符 '\n'、竖线 '|'、斜杠 '/' 分隔），拆分为独立活动项；
-    3. 统计各活动名称在所有行中的出现频次（同一行包含去重后计 1 次）；
-    4. 选取出现频次最高（数量最多）的活动名称，作为全表统一的项目名称*；
-    5. 若均为空则回退到默认兜底名称。
-    """
-    from collections import Counter
-    counter = Counter()
-    for s in activity_list:
-        if not s or pd.isna(s):
-            continue
-        val_str = str(s).strip()
-        if val_str in ['', 'nan', 'None']:
-            continue
-        # 以 顿号、分号、换行、竖线、斜杠 分隔多个活动名称
-        items = [x.strip() for x in re.split(r'[、;；\n|/]+', val_str) if x.strip()]
-        for item in set(items):
-            counter[item] += 1
-
-    if counter:
-        top_act, cnt = counter.most_common(1)[0]
-        return top_act
-    return default_name
-
 def read_source_df(source):
-    """安全读取源数据 DataFrame (支持路径、bytes、BytesIO)"""
+    """安全读取源数据 DataFrame (支持路径、bytes、BytesIO、Excel 及 CSV，自动探测编码)"""
     if isinstance(source, pd.DataFrame):
         return source.copy()
-    elif isinstance(source, bytes):
-        return pd.read_excel(io.BytesIO(source))
+    
+    # 辅助函数：尝试以多种方式将数据流/路径解析为 DataFrame
+    def parse_data_content(content_bytes=None, file_path=None):
+        # 1. 优先尝试 Excel 引擎
+        for engine in ['openpyxl', 'xlrd']:
+            try:
+                if content_bytes is not None:
+                    return pd.read_excel(io.BytesIO(content_bytes), engine=engine)
+                elif file_path is not None and not str(file_path).lower().endswith('.csv'):
+                    return pd.read_excel(file_path, engine=engine)
+            except Exception:
+                pass
+        # 2. 降级尝试 CSV (覆盖 utf-8-sig, gbk, utf-8)
+        for enc in ['utf-8-sig', 'gbk', 'utf-8']:
+            try:
+                if content_bytes is not None:
+                    return pd.read_csv(io.BytesIO(content_bytes), encoding=enc)
+                elif file_path is not None:
+                    return pd.read_csv(file_path, encoding=enc)
+            except Exception:
+                pass
+        return None
+
+    if isinstance(source, bytes):
+        res = parse_data_content(content_bytes=source)
+        if res is not None:
+            return res
+        raise ValueError("无法解析该字节流数据为 Excel 或 CSV 表格")
     elif hasattr(source, 'read'):
         if hasattr(source, 'seek'):
             source.seek(0)
         content = source.read()
         if hasattr(source, 'seek'):
             source.seek(0)
-        return pd.read_excel(io.BytesIO(content))
+        if isinstance(content, str):
+            content = content.encode('utf-8')
+        res = parse_data_content(content_bytes=content)
+        if res is not None:
+            return res
+        raise ValueError("无法解析该文件流数据为 Excel 或 CSV 表格")
     elif isinstance(source, (str, os.PathLike)):
-        return pd.read_excel(source)
+        res = parse_data_content(file_path=source)
+        if res is not None:
+            return res
+        raise ValueError(f"无法读取文件: {source}")
     else:
         raise ValueError(f"无法解析的数据源类型: {type(source)}")
+
+
+def ensure_header_detected(df, target_keywords, max_scan_rows=8):
+    """
+    智能表头自适应：若当前表头未包含目标关键字段（例如首行为空或为标题行合并单元格），
+    自动向下扫描前 max_scan_rows 行，发现表头行时自动提升为 DataFrame 列名。
+    """
+    if df is None or df.empty:
+        return df
+
+    cols_clean = [re.sub(r'[\s\(\)（）_\ufeff]+', '', str(c)) for c in df.columns]
+    # 如果现有列中已有目标关键字，直接返回
+    if any(any(kw in c for kw in target_keywords) for c in cols_clean):
+        return df
+
+    # 向下扫描前 max_scan_rows 行
+    for r_idx in range(min(max_scan_rows, len(df))):
+        row_vals = [re.sub(r'[\s\(\)（）_\ufeff]+', '', str(v)) for v in df.iloc[r_idx] if pd.notna(v)]
+        if any(any(kw in v for kw in target_keywords) for v in row_vals):
+            # 将该行提升为表头
+            new_df = df.iloc[r_idx + 1:].copy()
+            new_df.columns = [str(x).strip() if pd.notna(x) else f"Unnamed_{i}" for i, x in enumerate(df.iloc[r_idx].values)]
+            new_df.reset_index(drop=True, inplace=True)
+            return new_df
+
+    return df
+
+
+def find_column_by_candidates(df_columns, candidates, fallback_keywords=None, exclude_keywords=None):
+    """
+    智能多级嗅探列名：
+    1. 候选全字精确匹配 (去除标点、空白、BOM)
+    2. 候选子串包含匹配
+    3. 兜底关键字模糊匹配（自动过滤排除字段，例如排除'结算单号'、'身份证'等误伤）
+    """
+    col_map = {re.sub(r'[\s\(\)（）_\ufeff]+', '', str(c)): c for c in df_columns}
+    
+    # 第 1 级：按候选词顺序精确全等匹配
+    for cand in candidates:
+        cand_clean = re.sub(r'[\s\(\)（）_\ufeff]+', '', cand)
+        if cand_clean in col_map:
+            return col_map[cand_clean]
+            
+    # 第 2 级：按候选词顺序包含匹配
+    for cand in candidates:
+        cand_clean = re.sub(r'[\s\(\)（）_\ufeff]+', '', cand)
+        for clean_col, orig_col in col_map.items():
+            if cand_clean in clean_col:
+                return orig_col
+
+    # 第 3 级：兜底通用关键字模糊匹配
+    if fallback_keywords:
+        excludes = exclude_keywords or []
+        for kw in fallback_keywords:
+            for clean_col, orig_col in col_map.items():
+                if kw in clean_col and not any(ex in clean_col for ex in excludes):
+                    return orig_col
+
+    return None
+
 
 def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_target=None):
     """
@@ -230,32 +297,37 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
     df_details = read_source_df(detail_source)
     df_users = read_source_df(user_source)
 
-    # 1. 查找任务编号列
-    task_id_col = None
-    for c in df_tasks.columns:
-        if any(k in str(c) for k in ['任务明细编号', '任务编号', '编号', '作品编号']):
-            task_id_col = c
-            break
+    # 1. 动态嗅探任务编号列 (表头自适应 + 任务明细编号最高优先级)
+    df_tasks = ensure_header_detected(df_tasks, ['任务明细编号', '任务编号', '作品编号', '作品编码', '点评编码', '编号'])
+    task_id_col = find_column_by_candidates(
+        df_tasks.columns,
+        candidates=['任务明细编号', '任务编号', '作品编号', '作品编码', '点评编码'],
+        fallback_keywords=['编号'],
+        exclude_keywords=['结算单号', '结算单编号', '项目编号', '身份证', '银行', '手机', '序号', '电话', '单号']
+    )
     if not task_id_col:
         task_id_col = df_tasks.columns[0]
 
-    target_task_ids = set(df_tasks[task_id_col].dropna().astype(str).str.strip())
+    raw_task_ids = df_tasks[task_id_col].dropna().astype(str).str.strip().tolist()
+    target_task_ids = set(x for x in raw_task_ids if x and x.lower() not in ['nan', 'none', 'null'])
     if not target_task_ids:
-        raise ValueError("【任务编号表】中未能解析出任何有效的任务编号！")
+        raise ValueError(f"【任务编号表】的「{task_id_col}」列中未能解析出任何有效的任务编号！")
 
-    # 2. 查找明细表作品编号列
-    detail_code_col = None
-    for c in df_details.columns:
-        if any(k in str(c) for k in ['作品编号', '任务明细编号', '任务编号', '作品编码']):
-            detail_code_col = c
-            break
+    # 2. 动态嗅探明细表作品编号列 (表头自适应 + 支持作品编号/任务明细编号/作品编码)
+    df_details = ensure_header_detected(df_details, ['作品编号', '任务明细编号', '作品编码', '任务编号', '点评编码', '用户名称'])
+    detail_code_col = find_column_by_candidates(
+        df_details.columns,
+        candidates=['作品编号', '任务明细编号', '作品编码', '任务编号', '点评编码'],
+        fallback_keywords=['编号', '编码'],
+        exclude_keywords=['身份证', '银行', '手机', '序号', '电话', '单号']
+    )
     if not detail_code_col:
         detail_code_col = df_details.columns[0]
 
-    # 过滤待结算作品
+    # 过滤待结算作品 (白名单精准比对)
     matched_details = df_details[df_details[detail_code_col].astype(str).str.strip().isin(target_task_ids)].copy()
     if matched_details.empty:
-        raise ValueError(f"【明细表】中未找到任何匹配【任务编号表】({len(target_task_ids)}条) 的有效视频记录！")
+        raise ValueError(f"【明细表】的「{detail_code_col}」列中未找到任何匹配【任务编号表】「{task_id_col}」({len(target_task_ids)}条) 的有效视频记录！")
 
     # 3. 解析明细表各列
     col_d_name = next((c for c in matched_details.columns if any(k in str(c) for k in ['用户名称', '用户姓名', '姓名', '专家'])), None)
@@ -316,21 +388,6 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
     total_amount = 0
     total_tasks_count = len(matched_details)
 
-    # 动态分析本批次【参与活动】列：按规则统计出现数量最多的活动名称作为项目名称*
-    candidate_acts = []
-    if col_d_proj and matched_details[col_d_proj].dropna().astype(str).str.strip().ne('').any():
-        candidate_acts = matched_details[col_d_proj].dropna().tolist()
-    elif col_u_proj:
-        for group_key, grp in grouped:
-            cid_str = normalize_text_val(grp[col_d_cid].iloc[0]) if col_d_cid else ""
-            phone_str = normalize_text_val(grp[col_d_phone].iloc[0]) if col_d_phone else ""
-            u_info = user_map_by_id.get(cid_str) or user_map_by_phone.get(phone_str) or {}
-            act_val = u_info.get('参与活动', '')
-            if act_val:
-                candidate_acts.append(act_val)
-
-    global_proj_name = extract_top_activity_name(candidate_acts, default_name='健康之舟，医路通行')
-
     for group_key, grp in grouped:
         cid_str = normalize_text_val(grp[col_d_cid].iloc[0]) if col_d_cid else ""
         phone_str = normalize_text_val(grp[col_d_phone].iloc[0]) if col_d_phone else ""
@@ -367,7 +424,7 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
             '开始月*': None,
             '终止年*': None,
             '终止月*': None,
-            '项目名称*': global_proj_name,
+            '项目名称*': '健康之舟，医路通行',
             '金额*': points_sum,  # 纯整数，杜绝逗号与小数
             '姓名1*': name,
             '省份*': prov,
@@ -452,15 +509,34 @@ if __name__ == '__main__':
     detail_fp = args.detail
     user_fp = args.user
 
-    # 自动探测
+    # 智能多表自动探测 (内容特征优先，文件名特征兜底)
     if not (task_fp and detail_fp and user_fp):
-        candidates = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls')) and not f.startswith('~$') and '电签' not in f]
+        candidates = [f for f in os.listdir('.') if f.lower().endswith(('.xlsx', '.xls', '.csv')) and not f.startswith('~$') and '电签' not in f]
+        # 第 1 轮：读取各候选文件内容表头快速判定
         for f in candidates:
-            if not task_fp and any(k in f for k in ['任务编号', '任务']):
+            try:
+                peek_df = read_source_df(f)
+                peek_cols = [re.sub(r'[\s\(\)（）_\ufeff]+', '', str(c)) for c in peek_df.columns]
+                peek_str = ' '.join(peek_cols)
+                if not user_fp and any(k in peek_str for k in ['银行卡号', '开户行', '支行名称', '电签银行卡号', '结算账号']):
+                    user_fp = f
+                elif not detail_fp and (any(k in peek_str for k in ['科普课件', '课件链接', '视频链接']) or ('用户名称' in peek_str and ('积分' in peek_str or '作品编号' in peek_str))):
+                    detail_fp = f
+                elif not task_fp and any(k in peek_str for k in ['任务明细编号', '华东项目结算单号', '国康结算单号', '任务编号', '点评编码']):
+                    task_fp = f
+            except Exception:
+                pass
+
+        # 第 2 轮：按文件名特征补齐未锁定的表格
+        for f in candidates:
+            if f in [task_fp, detail_fp, user_fp]:
+                continue
+            f_lower = f.lower()
+            if not task_fp and any(k in f_lower for k in ['任务编号', '任务明细', '任务', '结算单', '待结算', 'task', 'kp']):
                 task_fp = f
-            elif not detail_fp and any(k in f for k in ['明细表', '明细']):
+            elif not detail_fp and any(k in f_lower for k in ['明细表', '明细', '作品', '视频', '课件', 'detail']):
                 detail_fp = f
-            elif not user_fp and any(k in f for k in ['用户信息', '用户']):
+            elif not user_fp and any(k in f_lower for k in ['用户信息', '用户', '专家', '银行', 'user']):
                 user_fp = f
 
     if not (task_fp and detail_fp and user_fp):
