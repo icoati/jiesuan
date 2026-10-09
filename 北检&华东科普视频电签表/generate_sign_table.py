@@ -330,24 +330,24 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
         raise ValueError(f"【明细表】的「{detail_code_col}」列中未找到任何匹配【任务编号表】「{task_id_col}」({len(target_task_ids)}条) 的有效视频记录！")
 
     # 3. 解析明细表各列
-    col_d_name = next((c for c in matched_details.columns if any(k in str(c) for k in ['用户名称', '用户姓名', '姓名', '专家'])), None)
-    col_d_cid = next((c for c in matched_details.columns if any(k in str(c) for k in ['身份证号', '身份证', '证件号'])), None)
-    col_d_phone = next((c for c in matched_details.columns if any(k in str(c) for k in ['手机号', '手机号码', '电话'])), None)
-    col_d_points = next((c for c in matched_details.columns if any(k in str(c) for k in ['积分', '金额', '费用'])), None)
-    col_d_hosp = next((c for c in matched_details.columns if any(k in str(c) for k in ['所在医院', '医院', '单位'])), None)
-    col_d_title = next((c for c in matched_details.columns if any(k in str(c) for k in ['用户职称', '医务职称', '职称'])), None)
-    col_d_proj = next((c for c in matched_details.columns if any(k in str(c) for k in ['参与活动', '活动名称', '项目名称', '项目'])), None)
+    col_d_name = find_column_by_candidates(matched_details.columns, ['用户名称', '用户姓名', '姓名', '专家'])
+    col_d_cid = find_column_by_candidates(matched_details.columns, ['身份证号', '身份证', '证件号'])
+    col_d_phone = find_column_by_candidates(matched_details.columns, ['手机号', '手机号码', '电话'])
+    col_d_points = find_column_by_candidates(matched_details.columns, ['积分', '金额', '费用'])
+    col_d_hosp = find_column_by_candidates(matched_details.columns, ['所在医院', '医院', '单位'])
+    col_d_title = find_column_by_candidates(matched_details.columns, ['用户职称', '医务职称', '职称'])
+    col_d_proj = find_column_by_candidates(matched_details.columns, ['参与活动', '活动名称', '项目名称', '活动', '项目'])
 
     # 4. 解析用户信息表各列
-    col_u_name = next((c for c in df_users.columns if any(k in str(c) for k in ['用户姓名', '姓名', '专家'])), None)
-    col_u_cid = next((c for c in df_users.columns if any(k in str(c) for k in ['身份证号', '身份证', '证件号'])), None)
-    col_u_phone = next((c for c in df_users.columns if any(k in str(c) for k in ['手机号码', '手机号', '电话'])), None)
-    col_u_card = next((c for c in df_users.columns if any(k in str(c) for k in ['银行卡号', '卡号', '结算账号', '账号'])), None)
-    col_u_bank = next((c for c in df_users.columns if any(k in str(c) for k in ['银行名称', '开户行', '开户银行'])), None)
-    col_u_branch = next((c for c in df_users.columns if any(k in str(c) for k in ['支行名称', '支行'])), None)
-    col_u_hosp = next((c for c in df_users.columns if any(k in str(c) for k in ['所在医院', '医院', '单位'])), None)
-    col_u_title = next((c for c in df_users.columns if any(k in str(c) for k in ['职称', '医务职称'])), None)
-    col_u_proj = next((c for c in df_users.columns if any(k in str(c) for k in ['参与活动', '活动名称', '项目名称', '项目'])), None)
+    col_u_name = find_column_by_candidates(df_users.columns, ['用户姓名', '姓名', '专家'])
+    col_u_cid = find_column_by_candidates(df_users.columns, ['身份证号', '身份证', '证件号'])
+    col_u_phone = find_column_by_candidates(df_users.columns, ['手机号码', '手机号', '电话'])
+    col_u_card = find_column_by_candidates(df_users.columns, ['银行卡号', '卡号', '结算账号', '账号'])
+    col_u_bank = find_column_by_candidates(df_users.columns, ['银行名称', '开户行', '开户银行'])
+    col_u_branch = find_column_by_candidates(df_users.columns, ['支行名称', '支行'])
+    col_u_hosp = find_column_by_candidates(df_users.columns, ['所在医院', '医院', '单位'])
+    col_u_title = find_column_by_candidates(df_users.columns, ['职称', '医务职称'])
+    col_u_proj = find_column_by_candidates(df_users.columns, ['参与活动', '活动名称', '项目名称', '活动', '项目'])
 
     # 建立用户信息映射
     user_map_by_id = {}
@@ -364,6 +364,8 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
         # 抓取源文件中的 银行名称+支行名称合并到一起，形成开户行 (智能去重与规范化)
         full_bank = format_bank_and_branch(bank_name, branch_name)
         user_proj = str(u[col_u_proj]).strip() if col_u_proj and pd.notna(u[col_u_proj]) else ""
+        if user_proj.lower() in ['nan', 'none', 'null']:
+            user_proj = ""
 
         u_dict = {
             '姓名': str(u[col_u_name]).strip() if col_u_name and pd.notna(u[col_u_name]) else "",
@@ -379,6 +381,19 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
             user_map_by_id[cid] = u_dict
         if phone:
             user_map_by_phone[phone] = u_dict
+
+    # 全局推断参与活动/项目名称默认值 (统计所有源表中出现频次最高的非空活动名称)
+    from collections import Counter
+    candidate_projs = []
+    if col_u_proj and not df_users.empty:
+        candidate_projs.extend([str(x).strip() for x in df_users[col_u_proj].dropna() if str(x).strip() and str(x).strip().lower() not in ['nan', 'none', 'null']])
+    if col_d_proj and not matched_details.empty:
+        candidate_projs.extend([str(x).strip() for x in matched_details[col_d_proj].dropna() if str(x).strip() and str(x).strip().lower() not in ['nan', 'none', 'null']])
+    col_t_proj = find_column_by_candidates(df_tasks.columns, ['参与活动', '活动名称', '项目名称', '活动'])
+    if col_t_proj and not df_tasks.empty:
+        candidate_projs.extend([str(x).strip() for x in df_tasks[col_t_proj].dropna() if str(x).strip() and str(x).strip().lower() not in ['nan', 'none', 'null']])
+
+    global_default_proj = Counter(candidate_projs).most_common(1)[0][0] if candidate_projs else '健康之舟，医路通行'
 
     # 5. 按医生归集（优先以身份证号分组，其次以手机号）
     doctor_records = []
@@ -415,6 +430,15 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
         if not name and u_info.get('姓名'):
             name = u_info.get('姓名')
 
+        # 动态提取项目名称：优先用户表「参与活动」，其次明细表「参与活动」，最后全局推断
+        doc_proj = u_info.get('参与活动')
+        if not doc_proj and col_d_proj:
+            d_projs = [str(x).strip() for x in grp[col_d_proj].dropna() if str(x).strip() and str(x).strip().lower() not in ['nan', 'none', 'null']]
+            if d_projs:
+                doc_proj = d_projs[0]
+        if not doc_proj:
+            doc_proj = global_default_proj
+
         # 省市映射
         prov, city = resolve_hospital_city(hosp)
 
@@ -424,7 +448,7 @@ def generate_kopu_sign_workbook(task_source, detail_source, user_source, output_
             '开始月*': None,
             '终止年*': None,
             '终止月*': None,
-            '项目名称*': '健康之舟，医路通行',
+            '项目名称*': doc_proj,
             '金额*': points_sum,  # 纯整数，杜绝逗号与小数
             '姓名1*': name,
             '省份*': prov,

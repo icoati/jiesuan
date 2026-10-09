@@ -288,6 +288,7 @@ def generate_dianping_sign_workbook(task_source, detail_source, user_source, out
     col_d_exp_title = find_column_by_candidates(matched_details.columns, ['专家职称', '职称', '医务职称'])
     col_d_exp_prov = find_column_by_candidates(matched_details.columns, ['专家所在省份', '专家省份', '省份'])
     col_d_points = find_column_by_candidates(matched_details.columns, ['积分', '金额', '费用', '等级积分'])
+    col_d_proj = find_column_by_candidates(matched_details.columns, ['参与活动', '活动名称', '项目名称', '项目', '活动'])
 
     # 4. 动态嗅探结算档案表（用户信息底表 671 行库）
     col_u_name = find_column_by_candidates(df_users.columns, ['用户姓名', '姓名', '专家姓名'])
@@ -300,7 +301,7 @@ def generate_dianping_sign_workbook(task_source, detail_source, user_source, out
     col_u_city = find_column_by_candidates(df_users.columns, ['城市', '开户行城市', '市'])
     col_u_hosp = find_column_by_candidates(df_users.columns, ['所在医院', '工作单位', '医院', '单位'])
     col_u_title = find_column_by_candidates(df_users.columns, ['职称', '医务职称'])
-    col_u_proj = find_column_by_candidates(df_users.columns, ['参与活动', '活动名称', '项目名称', '项目'])
+    col_u_proj = find_column_by_candidates(df_users.columns, ['参与活动', '活动名称', '项目名称', '项目', '活动'])
 
     # 建立档案映射字典 (优先通过身份证匹配，其次通过手机号)
     user_map_by_id = {}
@@ -320,6 +321,8 @@ def generate_dianping_sign_workbook(task_source, detail_source, user_source, out
         hosp = str(u[col_u_hosp]).strip() if col_u_hosp and pd.notna(u[col_u_hosp]) else ""
         title = str(u[col_u_title]).strip() if col_u_title and pd.notna(u[col_u_title]) else ""
         act = str(u[col_u_proj]).strip() if col_u_proj and pd.notna(u[col_u_proj]) else ""
+        if act.lower() in ['nan', 'none', 'null']:
+            act = ""
         name = str(u[col_u_name]).strip() if col_u_name and pd.notna(u[col_u_name]) else ""
 
         u_dict = {
@@ -338,6 +341,18 @@ def generate_dianping_sign_workbook(task_source, detail_source, user_source, out
             user_map_by_id[cid] = u_dict
         if phone:
             user_map_by_phone[phone] = u_dict
+
+    # 全局推断参与活动/项目名称默认值
+    from collections import Counter
+    candidate_projs = []
+    if col_u_proj and not df_users.empty:
+        candidate_projs.extend([str(x).strip() for x in df_users[col_u_proj].dropna() if str(x).strip() and str(x).strip().lower() not in ['nan', 'none', 'null']])
+    if col_d_proj and not matched_details.empty:
+        candidate_projs.extend([str(x).strip() for x in matched_details[col_d_proj].dropna() if str(x).strip() and str(x).strip().lower() not in ['nan', 'none', 'null']])
+    col_t_proj = find_column_by_candidates(df_tasks.columns, ['参与活动', '活动名称', '项目名称', '活动'])
+    if col_t_proj and not df_tasks.empty:
+        candidate_projs.extend([str(x).strip() for x in df_tasks[col_t_proj].dropna() if str(x).strip() and str(x).strip().lower() not in ['nan', 'none', 'null']])
+    global_default_proj = Counter(candidate_projs).most_common(1)[0][0] if candidate_projs else '医说就懂 健康指南项目-河北'
 
     # 5. 按专家归集结算数据 (防踩坑：支持多任务汇总，防止重复计算)
     doctor_records = []
@@ -371,7 +386,16 @@ def generate_dianping_sign_workbook(task_source, detail_source, user_source, out
         final_hosp = hosp or u_info.get('工作单位', '')
         final_title = title or u_info.get('医务职称', '')
         final_name = name or u_info.get('姓名', '')
-        final_proj = u_info.get('参与活动') or '医说就懂 健康指南项目-河北'
+
+        # 动态提取项目名称：优先用户表「参与活动」，其次明细表「参与活动」，最后全局推断
+        doc_proj = u_info.get('参与活动')
+        if not doc_proj and col_d_proj:
+            d_projs = [str(x).strip() for x in grp[col_d_proj].dropna() if str(x).strip() and str(x).strip().lower() not in ['nan', 'none', 'null']]
+            if d_projs:
+                doc_proj = d_projs[0]
+        if not doc_proj:
+            doc_proj = global_default_proj
+        final_proj = doc_proj
 
         # 省市确定
         prov = u_info.get('省份') or prov_exp
