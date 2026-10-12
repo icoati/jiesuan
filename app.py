@@ -1799,7 +1799,7 @@ elif current_module == MODULE_CORPUS:
             </div>
             <div>
                 <div class="ios-hero-title">{MODULE_CORPUS}</div>
-                <div class="ios-hero-subtitle">智能嗅探 3 张关键表格，自动完成实发清单、银行发放表与对账明细的端到端核验。<br>更新内容：生成表单增加项目名称，税前正算扣税逻辑，最终生成的文件名称为：康恩贝语料库电签表-生成日期</div>
+                <div class="ios-hero-subtitle">智能嗅探 3 张关键表格，自动完成实发清单、银行发放表与对账明细的端到端核验。<br>支持「💼 正算扣税」与「⚡ 不计税」双模式切换，项目名称智能提取双引号核心内容。</div>
             </div>
         </div>
         <div class="ios-hero-pill">
@@ -1900,121 +1900,206 @@ elif current_module == MODULE_CORPUS:
                 render_html('<span class="ios-badge-pending">待识别：用户列表(明文)</span>', container=chk_cols[2])
         render_html('</div>')
 
-    _, col_btn, _ = st.columns([1, 1.8, 1])
-    with col_btn:
-        ready_corpus = bool(uploaded_files and len(uploaded_files) >= 3)
-        run_btn = st.button(
-            f"开始生成：{MODULE_CORPUS}",
-            type="primary",
-            disabled=not ready_corpus if uploaded_files else False,
-            use_container_width=True
-        )
+    # ================= 专属高颜值：按照北检结算表风格采用 st.tabs 呈现选项 =================
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    tab_corp_tax, tab_corp_notax = st.tabs(["💼 正算扣税", "⚡ 不计税"])
 
-    if run_btn:
+    def run_corpus_settlement(corpus_mode: str):
         if not uploaded_files or len(uploaded_files) < 3:
-            st.error("每月语料结算需要 3 个源表格（支付清单、语料明文、用户明文），请完整上传")
-        else:
-            with st.status("正在沙盒中执行每月语料结算闭环核验...", expanded=True) as status:
-                st.write("1. 初始化沙盒环境并暂存表格...")
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    original_names = set()
-                    for uf in uploaded_files:
-                        fpath = os.path.join(temp_dir, uf.name)
-                        with open(fpath, "wb") as f:
-                            f.write(uf.getvalue())
-                        original_names.add(uf.name)
+            st.error("每月语料结算需要 3 个源表格（支付清单、语料明文、用户明文），请在上方完整上传。")
+            return
 
-                    st.write("2. 执行原版结算核算引擎...")
-                    script_path = os.path.join(ROOT_DIR, "语料库电签统计", "settlement_tool.py")
+        with st.status(f"正在沙盒环境中执行【{MODULE_CORPUS}】核心结算逻辑（模式：{corpus_mode}）...", expanded=True) as status:
+            st.write("1. 初始化沙盒环境并暂存表格...")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                original_names = set()
+                for uf in uploaded_files:
+                    fpath = os.path.join(temp_dir, uf.name)
+                    with open(fpath, "wb") as f:
+                        f.write(uf.getvalue())
+                    original_names.add(uf.name)
 
-                    env = os.environ.copy()
-                    env["PYTHONIOENCODING"] = "utf-8"
-                    env["PYTHONUTF8"] = "1"
+                st.write(f"2. 调度语料库结算核算引擎（{corpus_mode}）...")
+                script_path = os.path.join(ROOT_DIR, "语料库电签统计", "settlement_tool.py")
 
-                    proc = subprocess.run(
-                        [sys.executable, script_path, temp_dir],
-                        cwd=temp_dir,
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8"
-                    )
+                env = os.environ.copy()
+                env["PYTHONIOENCODING"] = "utf-8"
+                env["PYTHONUTF8"] = "1"
 
-                    output_files = {}
-                    warnings_text = None
-                    for p in Path(temp_dir).iterdir():
-                        if p.name not in original_names and not p.name.startswith("~$"):
-                            if p.name.endswith(".txt") and "警告" in p.name:
-                                with open(p, "r", encoding="utf-8") as wf:
-                                    warnings_text = wf.read()
-                            with open(p, "rb") as f:
-                                output_files[p.name] = f.read()
+                cmd = [sys.executable, script_path, temp_dir]
+                if corpus_mode == "不计税":
+                    cmd.append("--no-tax")
 
-                    if proc.returncode == 0 and output_files:
-                        status.update(label="月度结算全量完成", state="complete")
-                        st.success(f"成功完成结算，共产出 {len(output_files)} 个结算与对账文件")
+                proc = subprocess.run(
+                    cmd,
+                    cwd=temp_dir,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8"
+                )
 
-                        doc_cnt = re.search(r'本期结算总人数\s*:\s*(\d+)', proc.stdout)
-                        corp_cnt = re.search(r'本期结算语料数\s*:\s*(\d+)', proc.stdout)
-                        amt_cnt = re.search(r'本期应付总金额\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
+                output_files = {}
+                warnings_text = None
+                for p in Path(temp_dir).iterdir():
+                    if p.name not in original_names and not p.name.startswith("~$"):
+                        if p.name.endswith(".txt") and "警告" in p.name:
+                            with open(p, "r", encoding="utf-8") as wf:
+                                warnings_text = wf.read()
+                        with open(p, "rb") as f:
+                            output_files[p.name] = f.read()
 
-                        # 自动归档至历史记录
-                        d_str = f"{doc_cnt.group(1)} 位医生" if doc_cnt else "已校验"
-                        c_str = f"{corp_cnt.group(1)} 条" if corp_cnt else "已校验"
-                        a_str = f"¥ {amt_cnt.group(1)}" if amt_cnt else "已校验"
-                        kpi_summary = f"结算总人数 {d_str} · 结算语料数 {c_str} · 应付总金额 {a_str}"
-                        history_manager.save_run(MODULE_CORPUS, output_files, summary=kpi_summary)
+                if proc.returncode == 0 and output_files:
+                    today_str = get_beijing_now().strftime("%Y-%m-%d")
+                    final_base_name = f"康恩贝语料库电签表(不计税)-{today_str}" if corpus_mode == "不计税" else f"康恩贝语料库电签表-{today_str}"
+                    final_xlsx_name = f"{final_base_name}.xlsx"
+                    final_xls_name = f"{final_base_name}.xls"
+                    final_zip_name = f"{final_base_name}.zip"
 
-                        st.markdown("##### 本期结算核心 KPI 看板")
-                        m1, m2, m3 = st.columns(3)
-                        with m1:
-                            st.metric("结算总人数", f"{doc_cnt.group(1)} 位医生" if doc_cnt else "已校验")
-                        with m2:
-                            st.metric("结算语料数", f"{corp_cnt.group(1)} 条" if corp_cnt else "已校验")
-                        with m3:
-                            st.metric("应付总金额", f"¥ {amt_cnt.group(1)}" if amt_cnt else "已校验")
+                    status.update(label=f"【{MODULE_CORPUS}】({corpus_mode}) 处理完成！", state="complete")
+                    st.success(f"对账与结算明细表单生成完毕！主表格已生成：【{final_xlsx_name}】")
 
-                        if warnings_text:
-                            st.warning("发现部分待核查医生（如银行卡缺失），已自动单独提取为警告名单：")
-                            st.text_area("待核查名单详情", warnings_text, height=130)
+                    doc_cnt = re.search(r'本期结算总人数\s*:\s*(\d+)', proc.stdout)
+                    corp_cnt = re.search(r'本期结算语料数\s*:\s*(\d+)', proc.stdout)
+                    gross_cnt = re.search(r'本期应发总金额\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
+                    tax_cnt = re.search(r'本期代扣个税\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
+                    amt_cnt = re.search(r'本期应付总金额\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
 
-                        st.markdown("##### 生成表格预览与下载")
-                        tabs = st.tabs([f"{k} ({format_size(len(v))})" for k, v in output_files.items()])
-                        for idx, (fname, fbytes) in enumerate(output_files.items()):
-                            with tabs[idx]:
-                                if fname.endswith(".xlsx"):
-                                    try:
-                                        df_p = pd.read_excel(io.BytesIO(fbytes))
-                                        st.dataframe(df_p.head(100), use_container_width=True)
-                                    except Exception:
-                                        pass
-                                elif fname.endswith(".txt"):
-                                    st.code(fbytes.decode("utf-8", errors="ignore"))
+                    v_docs = f"{doc_cnt.group(1)} 位医生" if doc_cnt else "已校验"
+                    v_items = f"{corp_cnt.group(1)} 条" if corp_cnt else "已校验"
+                    v_net = f"¥ {amt_cnt.group(1)}" if amt_cnt else "¥ 0.00"
+                    v_gross = f"¥ {gross_cnt.group(1)}" if gross_cnt else v_net
+                    v_tax = f"¥ {tax_cnt.group(1)}" if tax_cnt else "¥ 0.00"
 
-                                st.download_button(
-                                    label=f"单独下载【{fname}】 ({format_size(len(fbytes))})",
-                                    data=fbytes,
-                                    file_name=fname,
-                                    key=f"dl_corp_{fname}"
-                                )
+                    # 自动归档至历史记录
+                    kpi_summary = f"[{corpus_mode}] 结算医生 {v_docs} · 语料 {v_items} · 实发 {v_net} · 应发 {v_gross} · 税金 {v_tax}"
+                    history_manager.save_run(MODULE_CORPUS, output_files, summary=kpi_summary)
 
-                        with st.expander("查看月度结算审计核查完整日志", expanded=False):
-                            st.code(proc.stdout)
+                    # KPI 指标展示
+                    st.markdown("##### 结算核对核心指标看板")
+                    k1, k2, k3, k4 = st.columns(4)
+                    with k1:
+                        st.metric("本次结算语料数", v_items)
+                    with k2:
+                        st.metric("本次结算医生数", v_docs)
+                    with k3:
+                        st.metric("实发劳务总金额", v_net)
+                    with k4:
+                        if corpus_mode == "不计税":
+                            st.metric("应发税前总额", v_gross, delta="¥ 0.00 免扣税金")
+                        else:
+                            st.metric("应发税前总额", v_gross, delta=f"-{v_tax} 扣缴个税")
 
-                        st.markdown("---")
-                        today_str = get_beijing_now().strftime("%Y-%m-%d")
-                        zip_data = create_zip_archive(output_files)
+                    if warnings_text:
+                        st.warning("发现部分待核查医生（如银行卡缺失），已自动单独提取为警告名单：")
+                        st.text_area("待核查名单详情", warnings_text, height=130)
+
+                    # 打包 ZIP
+                    zip_data = create_zip_archive(output_files)
+
+                    # 下载按钮组
+                    st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+                    _, col_dl_zip, _ = st.columns([1, 1.8, 1])
+                    with col_dl_zip:
                         st.download_button(
-                            label=f"打包下载全部月度结果文件 (ZIP) ({format_size(len(zip_data))})",
+                            label=f"📦 一键打包下载全部月度结果文件 ({final_zip_name}) ({format_size(len(zip_data))})",
                             data=zip_data,
-                            file_name=f"康恩贝语料库电签表-{today_str}.zip",
+                            file_name=final_zip_name,
                             mime="application/zip",
-                            use_container_width=True
+                            use_container_width=True,
+                            type="primary",
+                            key=f"dl_zip_corp_{corpus_mode}"
                         )
-                    else:
-                        status.update(label="结算生成失败", state="error")
-                        st.error("执行脚本时出错，详情如下：")
-                        st.code(proc.stderr or proc.stdout)
+
+                    cd1, cd2, cd3 = st.columns(3)
+                    with cd1:
+                        if final_xlsx_name in output_files:
+                            st.download_button(
+                                label=f"📄 下载最终表格【{final_xlsx_name}】 ({format_size(len(output_files[final_xlsx_name]))})",
+                                data=output_files[final_xlsx_name],
+                                file_name=final_xlsx_name,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key=f"dl_final_xlsx_{corpus_mode}"
+                            )
+                    with cd2:
+                        if final_xls_name in output_files:
+                            st.download_button(
+                                label=f"📄 下载银行导入表【{final_xls_name}】 ({format_size(len(output_files[final_xls_name]))})",
+                                data=output_files[final_xls_name],
+                                file_name=final_xls_name,
+                                mime="application/vnd.ms-excel",
+                                use_container_width=True,
+                                key=f"dl_final_xls_{corpus_mode}"
+                            )
+                    with cd3:
+                        detail_name = next((k for k in output_files if "结算筛选" in k and k.endswith(".xlsx")), None)
+                        if detail_name and detail_name in output_files:
+                            st.download_button(
+                                label=f"📄 下载对账明细表【{detail_name}】 ({format_size(len(output_files[detail_name]))})",
+                                data=output_files[detail_name],
+                                file_name=detail_name,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key=f"dl_detail_{corpus_mode}"
+                            )
+
+                    # 数据预览 Tabs
+                    st.markdown("##### 生成结果数据在线预览")
+                    preview_tabs = st.tabs([f"{k} ({format_size(len(v))})" for k, v in output_files.items()])
+                    for idx, (fname, fbytes) in enumerate(output_files.items()):
+                        with preview_tabs[idx]:
+                            if fname.endswith(".xlsx"):
+                                try:
+                                    df_p = pd.read_excel(io.BytesIO(fbytes))
+                                    st.dataframe(df_p.head(100), use_container_width=True)
+                                except Exception:
+                                    pass
+                            elif fname.endswith(".txt"):
+                                st.code(fbytes.decode("utf-8", errors="ignore"))
+
+                            st.download_button(
+                                label=f"单独下载【{fname}】 ({format_size(len(fbytes))})",
+                                data=fbytes,
+                                file_name=fname,
+                                key=f"dl_corp_prev_{corpus_mode}_{fname}"
+                            )
+
+                    with st.expander("查看月度结算审计核查完整日志", expanded=False):
+                        st.code(proc.stdout)
+
+                else:
+                    status.update(label="结算生成失败", state="error")
+                    st.error("执行脚本时出错，详情如下：")
+                    st.code(proc.stderr or proc.stdout)
+
+    with tab_corp_tax:
+        st.markdown("""
+        <div style="background: rgba(2, 132, 199, 0.05); border: 1px solid rgba(2, 132, 199, 0.2); border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; color: #0369a1; font-size: 0.88rem; line-height: 1.55;">
+            <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 4px;">💼 正算扣税模式说明：</div>
+            • <b>核算规则</b>：任务金额直接作为<b>税前应发金额</b>，专家依国家劳务报酬标准扣除个税后实发（应发≤800免税；800~4000扣除800按20%预扣；>4000扣除20%费用按超额累进预扣；例如应发 1000 元，扣税 40 元，实发 960 元）。<br>
+            • <b>交付表单</b>：主报销单命名为 <code>康恩贝语料库电签表-YYYY-MM-DD.xlsx</code>，生成的【金额*】列为税后实发金额；打包为 <code>康恩贝语料库电签表-YYYY-MM-DD.zip</code>。
+        </div>
+        """, unsafe_allow_html=True)
+        _, col_btn_tax, _ = st.columns([1, 1.8, 1])
+        with col_btn_tax:
+            btn_start_tax = st.button("🚀 开始生成：康恩贝语料库电签表（正算扣税）", type="primary", use_container_width=True, key="btn_exec_corp_tax")
+        if btn_start_tax:
+            run_corpus_settlement("正算扣税")
+
+    with tab_corp_notax:
+        st.markdown("""
+        <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; color: #047857; font-size: 0.88rem; line-height: 1.55;">
+            <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 4px;">⚡ 不计税模式说明：</div>
+            • <b>核算规则</b>：任务金额直接作为全额实发金额，<b>不扣税金，税金恒为 ¥ 0.00 元</b>（实发金额 = 任务应发总额；例如任务金额 1000 元，实发金额为 1000 元）。<br>
+            • <b>交付表单</b>：主报销单命名为 <code>康恩贝语料库电签表(不计税)-YYYY-MM-DD.xlsx</code>，生成的【金额*】列为全额任务金额；打包为 <code>康恩贝语料库电签表(不计税)-YYYY-MM-DD.zip</code>。
+        </div>
+        """, unsafe_allow_html=True)
+        _, col_btn_notax, _ = st.columns([1, 1.8, 1])
+        with col_btn_notax:
+            btn_start_notax = st.button("🚀 开始生成：康恩贝语料库电签表（不计税）", type="primary", use_container_width=True, key="btn_exec_corp_notax")
+        if btn_start_notax:
+            run_corpus_settlement("不计税")
 
 
 # =============================================================

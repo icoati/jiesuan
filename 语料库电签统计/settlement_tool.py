@@ -332,9 +332,10 @@ def load_smart_dataframe(filepath, required_alias_keys):
                         break
             except Exception:
                 continue
-        if max_matched_keys == len(required_alias_keys):
-            break
-
+    try:
+        xl.close()
+    except Exception:
+        pass
     return best_df, best_sheet
 
 # ==================== 4. 自动文件嗅探定位 ====================
@@ -382,9 +383,10 @@ def detect_input_files(target_dir):
     return pay_file, corpus_file, user_file
 
 # ==================== 5. 核心处理主程序 ====================
-def process_settlement(target_dir="."):
+def process_settlement(target_dir=".", no_tax=False):
     print("=" * 65)
-    print("   🏥 康恩贝医疗健康语料库 - 每月结算自动生成工具 (Mac/Win 通用)")
+    mode_text = "【不计税模式】" if no_tax else "【正算扣税模式】"
+    print(f"   🏥 康恩贝医疗健康语料库 - 每月结算自动生成工具 (Mac/Win 通用) {mode_text}")
     print("=" * 65)
     print(f"📁 工作文件夹: {os.path.abspath(target_dir)}")
     
@@ -531,6 +533,11 @@ def process_settlement(target_dir="."):
         if cid: user_map_by_id[cid] = r_dict
         if ph: user_map_by_phone[ph] = r_dict
 
+    try:
+        wb_u.close()
+    except Exception:
+        pass
+
     # 5. 汇总医生信息
     print("\n⏳ [4/4] 正在按医生汇总计算结算金额...")
     # 确定月份标签
@@ -619,9 +626,13 @@ def process_settlement(target_dir="."):
         title = str(grp[c_title_col].iloc[0]).strip() if c_title_col else ""
         count = len(grp)
         
-        # 逐笔累加真实单价得到任务应发金额，并正向扣缴个税计算实发金额
+        # 逐笔累加真实单价得到任务应发金额
         gross_amt = round(sum(price_map.get(cid_n, 100.0) for cid_n in grp['CORPUS_ID_NORM']), 2)
-        tax_amt, net_amt = calculate_tax_from_gross(gross_amt)
+        if no_tax:
+            tax_amt = 0.0
+            net_amt = gross_amt
+        else:
+            tax_amt, net_amt = calculate_tax_from_gross(gross_amt)
         
         # 首次提交日期
         first_submit_dt = pd.to_datetime(grp[c_time_col]).min() if c_time_col else datetime.now()
@@ -755,11 +766,12 @@ def process_settlement(target_dir="."):
         ws_final.column_dimensions[col_letter].width = min(max(max_l + 4, 12), 40)
         
     today_str = datetime.now().strftime("%Y-%m-%d")
-    out_final_xlsx = os.path.join(target_dir, f"康恩贝语料库电签表-{today_str}.xlsx")
+    base_file_name = f"康恩贝语料库电签表(不计税)-{today_str}" if no_tax else f"康恩贝语料库电签表-{today_str}"
+    out_final_xlsx = os.path.join(target_dir, f"{base_file_name}.xlsx")
     wb_final.save(out_final_xlsx)
     
     # 2. 康恩贝语料库电签表-{today_str}.xls (标准 BIFF8)
-    out_final_xls = os.path.join(target_dir, f"康恩贝语料库电签表-{today_str}.xls")
+    out_final_xls = os.path.join(target_dir, f"{base_file_name}.xls")
     if xlwt:
         wb_xls = xlwt.Workbook(encoding='utf-8')
         ws_xls = wb_xls.add_sheet('Sheet0')
@@ -917,7 +929,8 @@ def process_settlement(target_dir="."):
     wb_detail.save(out_detail_xlsx)
     
     print("\n" + "=" * 65)
-    print(f"🎉 恭喜！{month_tag} 结算数据已全部处理完成！")
+    mode_str = "不计税（全额发放任务金额，免扣个税）" if no_tax else "正算扣税（法定劳务报酬预扣预缴）"
+    print(f"🎉 恭喜！{month_tag} 结算数据已全部处理完成！(模式：{mode_str})")
     print("=" * 65)
     print(f" 📊 本期结算总人数 : {total_docs} 位医生")
     print(f" 📑 本期结算语料数 : {total_corpus_count} 条")
@@ -946,5 +959,9 @@ def process_settlement(target_dir="."):
     return True
 
 if __name__ == "__main__":
-    run_dir = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
-    process_settlement(run_dir)
+    import argparse
+    parser = argparse.ArgumentParser(description="康恩贝语料库电签表结算生成工具")
+    parser.add_argument("dir", nargs="?", default=".", help="工作目录")
+    parser.add_argument("--no-tax", action="store_true", help="不计税模式（全额任务金额发放，免扣个税）")
+    args = parser.parse_args()
+    process_settlement(target_dir=args.dir, no_tax=args.no_tax)
