@@ -1292,7 +1292,7 @@ if not st.session_state["authenticated"]:
 # 业务功能定义
 # -------------------------------------------------------------
 MODULE_SHANGYAO = "上药雷允上进度表"
-MODULE_CORPUS = "康恩贝语料库电签表"
+MODULE_CORPUS = "语料库电签表"
 MODULE_ZHENGHE = "北京整合-上药雷允上结算包"
 MODULE_JUMEI = "陈菊梅基金会-雷允上结算包"
 MODULE_SAAS = "老Saas医院导入模板"
@@ -1788,7 +1788,7 @@ print("SUCCESS_OUT2:" + str(out2))
 
 
 # =============================================================
-# 模块二：康恩贝语料库电签表
+# 模块二：语料库电签表
 # =============================================================
 elif current_module == MODULE_CORPUS:
     render_html(f"""
@@ -1951,7 +1951,7 @@ elif current_module == MODULE_CORPUS:
 
                 if proc.returncode == 0 and output_files:
                     today_str = get_beijing_now().strftime("%Y-%m-%d")
-                    final_base_name = f"康恩贝语料库电签表(不计税)-{today_str}" if corpus_mode == "不计税" else f"康恩贝语料库电签表-{today_str}"
+                    final_base_name = f"语料库电签表-{today_str}" if corpus_mode == "不计税" else f"康恩贝语料库电签表-{today_str}"
                     final_xlsx_name = f"{final_base_name}.xlsx"
                     final_xls_name = f"{final_base_name}.xls"
                     final_zip_name = f"{final_base_name}.zip"
@@ -2083,7 +2083,7 @@ elif current_module == MODULE_CORPUS:
         """, unsafe_allow_html=True)
         _, col_btn_tax, _ = st.columns([1, 1.8, 1])
         with col_btn_tax:
-            btn_start_tax = st.button("🚀 开始生成：康恩贝语料库电签表（正算扣税）", type="primary", use_container_width=True, key="btn_exec_corp_tax")
+            btn_start_tax = st.button("🚀 开始生成：语料库电签表（正算扣税）", type="primary", use_container_width=True, key="btn_exec_corp_tax")
         if btn_start_tax:
             run_corpus_settlement("正算扣税")
 
@@ -2092,12 +2092,12 @@ elif current_module == MODULE_CORPUS:
         <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; color: #047857; font-size: 0.88rem; line-height: 1.55;">
             <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 4px;">⚡ 不计税模式说明：</div>
             • <b>核算规则</b>：任务金额直接作为全额实发金额，<b>不扣税金，税金恒为 ¥ 0.00 元</b>（实发金额 = 任务应发总额；例如任务金额 1000 元，实发金额为 1000 元）。<br>
-            • <b>交付表单</b>：主报销单命名为 <code>康恩贝语料库电签表(不计税)-YYYY-MM-DD.xlsx</code>，生成的【金额*】列为全额任务金额；打包为 <code>康恩贝语料库电签表(不计税)-YYYY-MM-DD.zip</code>。
+            • <b>交付表单</b>：主报销单命名为 <code>语料库电签表-YYYY-MM-DD.xlsx</code>，生成的【金额*】列为全额任务金额；打包为 <code>语料库电签表-YYYY-MM-DD.zip</code>。
         </div>
         """, unsafe_allow_html=True)
         _, col_btn_notax, _ = st.columns([1, 1.8, 1])
         with col_btn_notax:
-            btn_start_notax = st.button("🚀 开始生成：康恩贝语料库电签表（不计税）", type="primary", use_container_width=True, key="btn_exec_corp_notax")
+            btn_start_notax = st.button("🚀 开始生成：语料库电签表（不计税）", type="primary", use_container_width=True, key="btn_exec_corp_notax")
         if btn_start_notax:
             run_corpus_settlement("不计税")
 

@@ -346,6 +346,7 @@ def detect_input_files(target_dir):
         if not os.path.basename(f).startswith("~$")
         and not os.path.basename(f).startswith("最终")
         and not os.path.basename(f).startswith("康恩贝语料库电签表")
+        and not os.path.basename(f).startswith("语料库电签表")
         and "结算筛选" not in os.path.basename(f)
         and "对账" not in os.path.basename(f)
     ]
@@ -766,11 +767,11 @@ def process_settlement(target_dir=".", no_tax=False):
         ws_final.column_dimensions[col_letter].width = min(max(max_l + 4, 12), 40)
         
     today_str = datetime.now().strftime("%Y-%m-%d")
-    base_file_name = f"康恩贝语料库电签表(不计税)-{today_str}" if no_tax else f"康恩贝语料库电签表-{today_str}"
+    base_file_name = f"语料库电签表-{today_str}" if no_tax else f"康恩贝语料库电签表-{today_str}"
     out_final_xlsx = os.path.join(target_dir, f"{base_file_name}.xlsx")
     wb_final.save(out_final_xlsx)
     
-    # 2. 康恩贝语料库电签表-{today_str}.xls (标准 BIFF8)
+    # 2. {base_file_name}.xls (标准 BIFF8)
     out_final_xls = os.path.join(target_dir, f"{base_file_name}.xls")
     if xlwt:
         wb_xls = xlwt.Workbook(encoding='utf-8')
@@ -960,7 +961,7 @@ def process_settlement(target_dir=".", no_tax=False):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="康恩贝语料库电签表结算生成工具")
+    parser = argparse.ArgumentParser(description="语料库电签表结算生成工具")
     parser.add_argument("dir", nargs="?", default=".", help="工作目录")
     parser.add_argument("--no-tax", action="store_true", help="不计税模式（全额任务金额发放，免扣个税）")
     args = parser.parse_args()
