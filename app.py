@@ -2887,7 +2887,7 @@ elif current_module == MODULE_BEIJIAN:
 
     # ================= 专属高颜值：按照 HCP 风格采用 st.tabs 呈现选项 =================
     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    tab_tax, tab_notax = st.tabs(["🧮 倒推算税", "⚡ 不算税"])
+    tab_tax, tab_hcp, tab_notax = st.tabs(["🧮 倒推算税", "💼 HCP自行承担税费", "⚡ 不算税"])
 
     def run_beijian_settlement(beijian_mode: str):
         if not file_1_obj or not file_2_obj or not file_3_obj:
@@ -2913,12 +2913,16 @@ elif current_module == MODULE_BEIJIAN:
                 st.write(f"2. 调度北检结算表核算引擎（{beijian_mode}）...")
                 import importlib
                 try:
-                    if beijian_mode == "不算税":
+                    if beijian_mode == "HCP自行承担税费":
+                        beijian_engine = importlib.import_module("北检结算表.generate_settlement_hcp")
+                    elif beijian_mode == "不算税":
                         beijian_engine = importlib.import_module("北检结算表.generate_settlement_notax")
                     else:
                         beijian_engine = importlib.import_module("北检结算表.generate_settlement")
                 except ModuleNotFoundError:
-                    if beijian_mode == "不算税":
+                    if beijian_mode == "HCP自行承担税费":
+                        beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement_hcp")
+                    elif beijian_mode == "不算税":
                         beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement_notax")
                     else:
                         beijian_engine = importlib.import_module("北检&康恩贝结算表.generate_settlement")
@@ -2940,7 +2944,12 @@ elif current_module == MODULE_BEIJIAN:
 
                 if res.get("success"):
                     today_str = get_beijing_now().strftime("%Y-%m-%d")
-                    final_base_name = f"不算税-{today_str}" if beijian_mode == "不算税" else f"算税-{today_str}"
+                    if beijian_mode == "HCP自行承担税费":
+                        final_base_name = f"HCP自行承担税费-{today_str}"
+                    elif beijian_mode == "不算税":
+                        final_base_name = f"不算税-{today_str}"
+                    else:
+                        final_base_name = f"算税-{today_str}"
                     final_xlsx_name = f"{final_base_name}.xlsx"
                     zip_file_name = f"{final_base_name}.zip"
 
@@ -2959,6 +2968,8 @@ elif current_module == MODULE_BEIJIAN:
                     with k4:
                         if beijian_mode == "不算税":
                             st.metric("应发税前总额", f"¥ {res['total_gross']:,.2f}", delta="¥ 0.00 免扣税金")
+                        elif beijian_mode == "HCP自行承担税费":
+                            st.metric("应发税前总额", f"¥ {res['total_gross']:,.2f}", delta=f"-¥ {res['total_tax']:,.2f} 扣缴个税")
                         else:
                             st.metric("应发税前总额", f"¥ {res['total_gross']:,.2f}", delta=f"-¥ {res['total_tax']:,.2f} 税金")
 
@@ -3087,6 +3098,20 @@ elif current_module == MODULE_BEIJIAN:
             btn_start_tax = st.button("🚀 开始生成：北检结算表（倒推算税）", type="primary", use_container_width=True, key="btn_exec_beijian_tax")
         if btn_start_tax:
             run_beijian_settlement("倒推算税")
+
+    with tab_hcp:
+        st.markdown("""
+        <div style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; color: #b45309; font-size: 0.88rem; line-height: 1.55;">
+            <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 4px;">💼 HCP自行承担税费模式说明（正推算税）：</div>
+            • <b>核算规则</b>：任务金额直接作为<b>税前应发金额</b>，专家依国家劳务报酬标准自行承担个人所得税，个税从应发金额中扣除后发放（实发 = 应发 - 个税；例如收入 1000 元，扣除 800 费用后按 20% 计税 40 元，实发到手 960 元）。<br>
+            • <b>交付表单</b>：主报销单命名为 <code>HCP自行承担税费-YYYY-MM-DD.xlsx</code>，附带税前应发、代扣个税及税后实发列；打包为 <code>HCP自行承担税费-YYYY-MM-DD.zip</code>。
+        </div>
+        """, unsafe_allow_html=True)
+        _, col_btn_hcp, _ = st.columns([1, 1.8, 1])
+        with col_btn_hcp:
+            btn_start_hcp = st.button("🚀 开始生成：北检结算表（HCP自行承担税费）", type="primary", use_container_width=True, key="btn_exec_beijian_hcp")
+        if btn_start_hcp:
+            run_beijian_settlement("HCP自行承担税费")
 
     with tab_notax:
         st.markdown("""
