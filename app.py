@@ -1128,6 +1128,16 @@ SVG_BANK_CLEAN = """
 </svg>
 """
 
+SVG_SURVEY_CASE = """
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+    <polyline points="14 2 14 8 20 8"></polyline>
+    <path d="M16 13H8"></path>
+    <path d="M16 17H8"></path>
+    <path d="M10 9H8"></path>
+</svg>
+"""
+
 
 
 # -------------------------------------------------------------
@@ -1299,6 +1309,7 @@ MODULE_SAAS = "老Saas医院导入模板"
 MODULE_BEIJIAN = "北检结算表"
 MODULE_KOPU = "北检&华东科普视频电签表"
 MODULE_DIANPING = "北检&华东科普点评电签表"
+MODULE_SURVEY_CASE = "调研案例电签表"
 MODULE_BANK_CLEAN = "HCP开户行清洗与质检"
 
 MODULE_OPTIONS = [
@@ -1310,6 +1321,7 @@ MODULE_OPTIONS = [
     MODULE_BEIJIAN,
     MODULE_KOPU,
     MODULE_DIANPING,
+    MODULE_SURVEY_CASE,
     MODULE_BANK_CLEAN
 ]
 
@@ -3773,7 +3785,288 @@ elif current_module == MODULE_DIANPING:
 
 
 # =============================================================
-# 模块九：HCP开户行清洗与质检
+# 模块：调研案例电签表
+# =============================================================
+elif current_module == MODULE_SURVEY_CASE:
+    render_html(f"""
+    <div class="ios-hero-banner">
+        <div class="ios-hero-left">
+            <div class="ios-hero-icon-badge">
+                {SVG_SURVEY_CASE}
+            </div>
+            <div>
+                <div class="ios-hero-title">{MODULE_SURVEY_CASE}</div>
+                <div class="ios-hero-subtitle">智能嗅探问卷答卷明细、进度确认表与项目人员列表，动态真实抓取项目名称与明文信息，自动完成多案例积分汇总与标准 20 列纯净电签表生成。</div>
+            </div>
+        </div>
+        <div class="ios-hero-pill">
+            <span class="ios-hero-pill-dot"></span>
+            自适应动态核销
+        </div>
+    </div>
+    """)
+
+    # 历史归档抽屉 (位于顶部横幅下方)
+    history_manager.render_history_ui(MODULE_SURVEY_CASE)
+
+    render_html("""
+    <div class="bento-req-container">
+        <div class="bento-req-header">
+            <div class="bento-req-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
+                <span>源文件规范与自动识别要求</span>
+            </div>
+            <div class="bento-req-badge">3 表全自动智能动态嗅探</div>
+        </div>
+        <div class="bento-req-grid">
+            <div class="bento-card">
+                <div class="bento-card-num">01</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">进度确认表 <span class="req-tag-opt">推荐</span></div>
+                    <div class="bento-card-desc">含「进度」或「已确认」，提供待结算【任务明细编码】白名单（未提供时自动回退为按审核通过结算）</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">02</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">答卷明细表 (明文) <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">含「答卷」或「明细」或日期，包含明文身份证、手机号、【本次获得积分】及任务名称</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">03</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">项目人员列表 (明文) <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">含「人员」或「用户」，包含医生【银行卡号】、【银行名称】、【支行】等专家档案</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """)
+
+    uploaded_survey_files = st.file_uploader(
+        "拖拽或批量选择上传源表格 (.xlsx / .xls，支持同时选择上传 2~3 个文件)",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="upload_survey_case"
+    )
+
+    # 智能实时预识别嗅探
+    sc_progress_name, sc_detail_name, sc_user_name = None, None, None
+    if uploaded_survey_files:
+        for uf in uploaded_survey_files:
+            fn = uf.name.lower()
+            if ("人员" in fn or "用户" in fn or "专家" in fn or "医生" in fn) and not sc_user_name:
+                sc_user_name = uf.name
+            elif ("进度" in fn or "已确认" in fn or "确认" in fn or "名单" in fn) and not sc_progress_name:
+                sc_progress_name = uf.name
+            elif ("答卷" in fn or "明细" in fn or "调研" in fn or re.search(r'\d+[\-_]\d+', fn)) and not sc_detail_name:
+                sc_detail_name = uf.name
+
+        # 内容特征二次嗅探
+        for uf in uploaded_survey_files:
+            if uf.name in [sc_progress_name, sc_detail_name, sc_user_name]:
+                continue
+            try:
+                df_head = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=3)
+                cols_text = "".join([str(c) for c in df_head.columns])
+                if not sc_user_name and ("银行卡" in cols_text or "开工状态" in cols_text or "执业证" in cols_text):
+                    sc_user_name = uf.name
+                elif not sc_detail_name and ("答卷" in cols_text or "本次获得积分" in cols_text or "单份最大积分" in cols_text):
+                    sc_detail_name = uf.name
+                elif not sc_progress_name and ("核验结果" in cols_text and "任务明细编码" in cols_text):
+                    sc_progress_name = uf.name
+            except Exception:
+                pass
+
+        render_html('<div class="ios-precheck-box"><b>智能嗅探识别进度：</b><br>')
+        chk_cols = st.columns(3)
+        with chk_cols[0]:
+            if sc_detail_name:
+                render_html(f'<span class="ios-badge-success">答卷明细表：已锁定</span><br><small style="opacity:0.8;">{sc_detail_name}</small>', container=chk_cols[0])
+            else:
+                render_html('<span class="ios-badge-pending">待识别：答卷明细表 (明文)</span>', container=chk_cols[0])
+        with chk_cols[1]:
+            if sc_user_name:
+                render_html(f'<span class="ios-badge-success">项目人员表：已锁定</span><br><small style="opacity:0.8;">{sc_user_name}</small>', container=chk_cols[1])
+            else:
+                render_html('<span class="ios-badge-pending">待识别：项目人员列表 (明文)</span>', container=chk_cols[1])
+        with chk_cols[2]:
+            if sc_progress_name:
+                render_html(f'<span class="ios-badge-success">进度确认表：已锁定</span><br><small style="opacity:0.8;">{sc_progress_name}</small>', container=chk_cols[2])
+            else:
+                render_html('<span class="ios-badge-pending" style="background: rgba(148, 163, 184, 0.15); color: #64748b;">可选：进度确认表 (未传自动按通过明细结算)</span>', container=chk_cols[2])
+        render_html('</div>')
+
+    st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+    _, col_btn_sc, _ = st.columns([1, 1.8, 1])
+    with col_btn_sc:
+        btn_start_sc = st.button(f"🚀 开始生成：{MODULE_SURVEY_CASE}", type="primary", use_container_width=True, key="btn_exec_survey_case")
+
+    if btn_start_sc:
+        if not uploaded_survey_files or len(uploaded_survey_files) < 2:
+            st.error("调研案例结算至少需要上传【答卷明细表】与【项目人员列表】（共 2~3 个源文件），请在上方完整上传。")
+        else:
+            with st.status(f"正在沙盒环境中执行【{MODULE_SURVEY_CASE}】核心结算逻辑...", expanded=True) as status:
+                st.write("1. 初始化沙盒运行环境并写入源表格...")
+                with tempfile.TemporaryDirectory(prefix="survey_case_") as temp_dir:
+                    original_names = set()
+                    for uf in uploaded_survey_files:
+                        fpath = os.path.join(temp_dir, uf.name)
+                        with open(fpath, "wb") as f:
+                            f.write(uf.getvalue())
+                        original_names.add(uf.name)
+
+                    st.write("2. 调度调研案例结算核算引擎进行多表智能勾稽...")
+                    script_path = os.path.join(ROOT_DIR, "调研案例电签表", "settlement_survey_case.py")
+
+                    env = os.environ.copy()
+                    env["PYTHONIOENCODING"] = "utf-8"
+                    env["PYTHONUTF8"] = "1"
+
+                    cmd = [sys.executable, script_path, temp_dir]
+                    proc = subprocess.run(
+                        cmd,
+                        cwd=temp_dir,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8"
+                    )
+
+                    output_files = {}
+                    warnings_text = None
+                    for p in Path(temp_dir).iterdir():
+                        if p.name not in original_names and not p.name.startswith("~$"):
+                            if p.name.endswith(".txt") and "警告" in p.name:
+                                with open(p, "r", encoding="utf-8") as wf:
+                                    warnings_text = wf.read()
+                            with open(p, "rb") as f:
+                                output_files[p.name] = f.read()
+
+                    if proc.returncode == 0 and output_files:
+                        today_str = get_beijing_now().strftime("%Y-%m-%d")
+                        final_base_name = f"调研案例电签表-{today_str}"
+                        final_xlsx_name = f"{final_base_name}.xlsx"
+                        final_xls_name = f"{final_base_name}.xls"
+                        final_zip_name = f"{final_base_name}.zip"
+
+                        status.update(label=f"【{MODULE_SURVEY_CASE}】处理完成！", state="complete")
+                        st.success(f"对账与结算明细表单生成完毕！主表格已生成：【{final_xlsx_name}】")
+
+                        # 核心 KPI 提取
+                        doc_cnt = re.search(r'本期结算总人数\s*:\s*(\d+)', proc.stdout)
+                        case_cnt = re.search(r'本期完成案例数\s*:\s*(\d+)', proc.stdout)
+                        amt_cnt = re.search(r'本期发放总金额\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
+                        proj_cnt = re.search(r'核心项目名称\s*:\s*(.+)', proc.stdout)
+
+                        v_docs = f"{doc_cnt.group(1)} 位医生" if doc_cnt else "已校验"
+                        v_cases = f"{case_cnt.group(1)} 份" if case_cnt else "已校验"
+                        v_amt = f"¥ {amt_cnt.group(1)}" if amt_cnt else "¥ 0.00"
+                        v_proj = proj_cnt.group(1).strip() if proj_cnt else "调研案例征集"
+
+                        # 自动归档至历史记录
+                        kpi_summary = f"结算医生 {v_docs} · 完成案例 {v_cases} · 发放总额 {v_amt} · 项目: {v_proj}"
+                        history_manager.save_run(MODULE_SURVEY_CASE, output_files, summary=kpi_summary)
+
+                        # KPI 指标展示
+                        st.markdown("##### 结算核对核心指标看板")
+                        k1, k2, k3, k4 = st.columns(4)
+                        with k1:
+                            st.metric("结算医生数", v_docs)
+                        with k2:
+                            st.metric("有效案例数", v_cases)
+                        with k3:
+                            st.metric("劳务发放总额", v_amt)
+                        with k4:
+                            st.metric("核心项目名称", v_proj)
+
+                        if warnings_text:
+                            st.warning("发现部分待核查医生（如银行卡缺失或开户行异常），已自动单独提取为警告名单：")
+                            st.text_area("待核查名单详情", warnings_text, height=130)
+
+                        # 打包 ZIP
+                        zip_data = create_zip_archive(output_files)
+
+                        # 下载按钮组
+                        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+                        _, col_dl_zip, _ = st.columns([1, 1.8, 1])
+                        with col_dl_zip:
+                            st.download_button(
+                                label=f"📦 一键打包下载全部月度结果文件 ({final_zip_name}) ({format_size(len(zip_data))})",
+                                data=zip_data,
+                                file_name=final_zip_name,
+                                mime="application/zip",
+                                use_container_width=True,
+                                type="primary",
+                                key="dl_zip_survey_case"
+                            )
+
+                        cd1, cd2, cd3 = st.columns(3)
+                        with cd1:
+                            if final_xlsx_name in output_files:
+                                st.download_button(
+                                    label=f"📄 下载最终表格【{final_xlsx_name}】 ({format_size(len(output_files[final_xlsx_name]))})",
+                                    data=output_files[final_xlsx_name],
+                                    file_name=final_xlsx_name,
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True,
+                                    key="dl_final_xlsx_sc"
+                                )
+                        with cd2:
+                            if final_xls_name in output_files:
+                                st.download_button(
+                                    label=f"📄 下载银行导入表【{final_xls_name}】 ({format_size(len(output_files[final_xls_name]))})",
+                                    data=output_files[final_xls_name],
+                                    file_name=final_xls_name,
+                                    mime="application/vnd.ms-excel",
+                                    use_container_width=True,
+                                    key="dl_final_xls_sc"
+                                )
+                        with cd3:
+                            warn_name = next((k for k in output_files if "警告" in k and k.endswith(".txt")), None)
+                            if warn_name and warn_name in output_files:
+                                st.download_button(
+                                    label=f"⚠️ 下载待核查名单【{warn_name}】 ({format_size(len(output_files[warn_name]))})",
+                                    data=output_files[warn_name],
+                                    file_name=warn_name,
+                                    mime="text/plain",
+                                    use_container_width=True,
+                                    key="dl_warn_sc"
+                                )
+
+                        # 数据在线预览
+                        st.markdown("##### 生成结果数据在线预览")
+                        preview_tabs = st.tabs([f"{k} ({format_size(len(v))})" for k, v in output_files.items()])
+                        for idx, (fname, fbytes) in enumerate(output_files.items()):
+                            with preview_tabs[idx]:
+                                if fname.endswith(".xlsx"):
+                                    try:
+                                        df_p = pd.read_excel(io.BytesIO(fbytes))
+                                        st.dataframe(df_p.head(100), use_container_width=True)
+                                    except Exception:
+                                        pass
+                                elif fname.endswith(".txt"):
+                                    st.code(fbytes.decode("utf-8", errors="ignore"))
+
+                                st.download_button(
+                                    label=f"单独下载【{fname}】 ({format_size(len(fbytes))})",
+                                    data=fbytes,
+                                    file_name=fname,
+                                    key=f"dl_sc_prev_{fname}"
+                                )
+
+                        with st.expander("查看本期案例结算核查完整审计日志", expanded=False):
+                            st.code(proc.stdout)
+
+                    else:
+                        status.update(label="结算生成失败", state="error")
+                        st.error("执行脚本时出错，详情如下：")
+                        st.code(proc.stderr or proc.stdout)
+
+
+# =============================================================
+# 模块十：HCP开户行清洗与质检
 # =============================================================
 elif current_module == MODULE_BANK_CLEAN:
     render_html(f"""
