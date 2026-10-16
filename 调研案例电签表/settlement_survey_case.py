@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-调研案例电签表 一键智能生成工具 (工业级自适应版)
+调研案例电签表 一键智能生成工具 (工业级高精度纯文本版)
 =============================================================================
 适用业务场景：
   医药调研、案例征集等多问卷/多案例收集类电签结算。
@@ -10,7 +10,7 @@
   1. 真实抓取，绝不硬编码：
      - 动态列名自适应嗅探（免疫 SaaS 导出列偏移与列名同义词变动）；
      - 项目名称/活动名称真实抓取（从明细、用户表或任务名中统计最高频真实名称）；
-     - 身份证号、手机号、银行卡号强制从明文表抓取，杜绝星号脱敏泄露；
+     - 身份证号、手机号、银行卡号强制纯字符串读取 (dtype=str)，彻底根除 IEEE 754 浮点截断；
   2. 三表安全勾稽：
      - 表 1【进度/确认表】：提供待结算的“任务明细编码”白名单；（若未提供，自动根据明细表审核状态自适应回退）
      - 表 2【问卷/案例明细表】：提供明文身份证、手机号、任务名称、答卷时间、本次获得积分；
@@ -19,7 +19,7 @@
      - 严格输出 20 列标准格式：姓名*、开始年*、开始月*、开始日*、项目名称*、金额*、姓名1*、
        省份*、市*、身份证*、手机号*、开户行*、银行卡号*、工作单位*、医务职称*、科室*、
        签署日期、签署日期1、身份证头像面、身份证反面；
-     - 银行卡号防科学计数法截断；开户行智能去重合并；
+     - 银行卡号强制文本格式 (@) 输出，支持卡BIN反查总行；
      - 生成对账明细表与异常核验名单，支持 xlsx 与标准 xls 双格式。
 """
 
@@ -71,7 +71,19 @@ COLUMN_ALIASES = {
     'id_back_pic': ['身份证反面', '身份证国徽面', '身份证照片反面']
 }
 
-# 城市智能识别规则库（兜底）
+# 银联常用卡BIN速查（兜底补齐总行）
+BANK_BIN_MAP = {
+    "622202": "中国工商银行", "622200": "中国工商银行", "621226": "中国工商银行", "621723": "中国工商银行",
+    "622700": "中国建设银行", "621700": "中国建设银行", "436742": "中国建设银行",
+    "622848": "中国农业银行", "622845": "中国农业银行", "622846": "中国农业银行",
+    "621661": "中国银行", "621660": "中国银行", "601382": "中国银行", "621790": "中国银行",
+    "622260": "交通银行", "622262": "交通银行",
+    "621098": "中国邮政储蓄银行", "622188": "中国邮政储蓄银行", "621798": "中国邮政储蓄银行",
+    "621483": "招商银行", "621485": "招商银行", "622588": "招商银行",
+    "622521": "上海浦东发展银行", "621789": "上海浦东发展银行",
+    "622690": "中信银行", "622660": "中国光大银行", "622622": "中国民生银行"
+}
+
 CITY_RULES = [
     (r'(北京)', '北京市', '北京市'),
     (r'(上海)', '上海市', '上海市'),
@@ -101,31 +113,25 @@ def clean_str(val):
     if val is None or pd.isna(val):
         return ""
     s = str(val).strip()
-    if s.lower() in ['nan', 'none', 'null', 'undefined', '']:
+    if s.lower() in ['nan', 'none', 'null', 'undefined']:
         return ""
     if s.endswith(".0"):
-        # 针对手机号或整数字符串清理 .0 后缀
         prefix = s[:-2]
         if prefix.isdigit():
             s = prefix
     return s
 
 def clean_card_number(val):
-    """银行卡号专用清洗：去除科学计数法、.0、空格"""
+    """银行卡号专用清洗：纯文本处理，严禁 float 转换，杜绝精度截断"""
     if val is None or pd.isna(val):
         return ""
     s = str(val).strip()
-    if not s or s.lower() in ['nan', 'none']:
+    if not s or s.lower() in ['nan', 'none', 'null', 'undefined']:
         return ""
-    if 'e+' in s.lower():
-        try:
-            return f"{int(float(s)):d}"
-        except Exception:
-            pass
     if s.endswith(".0"):
         s = s[:-2]
-    # 只保留数字和连字符
-    s = re.sub(r'[^\d\-X]', '', s)
+    # 保留纯数字和连字符，绝对不转 float
+    s = re.sub(r'[^\d\-]', '', s)
     return s
 
 def find_column_by_aliases(columns, alias_key):
@@ -144,10 +150,16 @@ def find_column_by_aliases(columns, alias_key):
                 return original_col
     return None
 
-def format_bank_and_branch(bank_val, branch_val):
-    """开户行与支行智能合并（去重规范化）"""
+def format_bank_and_branch(card_num, bank_val, branch_val):
+    """开户行与支行智能合并（去重规范化与卡BIN智能补全）"""
     b = clean_str(bank_val)
     br = clean_str(branch_val)
+    
+    # 若银行总行缺失，通过卡BIN自动推断
+    if not b and card_num and len(card_num) >= 6:
+        bin6 = card_num[:6]
+        b = BANK_BIN_MAP.get(bin6, "")
+        
     if not b and not br:
         return ""
     if not br:
@@ -160,7 +172,7 @@ def format_bank_and_branch(bank_val, branch_val):
         return br
     if br in b:
         return b
-    if b.endswith('支行') or b.endswith('营业部'):
+    if b.endswith('支行') or b.endswith('营业部') or b.endswith('分行'):
         return b
     return b + br
 
@@ -175,33 +187,18 @@ def infer_location_from_hospital(hospital_name):
     return "", ""
 
 def extract_clean_project_name(name_str):
-    """
-    真实抓取项目名称：
-    1. 若包含双引号或书名号，提取核心内容；
-    2. 若包含科室括号后缀（如 “...（全科医学科）”），剔除科室后缀，保留真实项目主体；
-    3. 否则保留原文本。
-    """
+    """真实抓取项目名称主体，去除括号后缀"""
     if not name_str:
         return ""
     s = str(name_str).strip()
-    
-    # 优先引号
     m_cn = re.findall(r'[“"《「]([^”"》」]+)[”"》」]', s)
     if m_cn and m_cn[0].strip():
         return m_cn[0].strip()
-        
-    # 去除末尾的科室或分类括号，例如（心血管内科）、（全科医学科）
     s_cleaned = re.sub(r'[\(（][^\)）]*(?:科|医学|部|室|内科|外科)[^\)）]*[\)）]$', '', s).strip()
     return s_cleaned or s
 
 # ==================== 3. 自动嗅探定位源文件 ====================
 def detect_source_files(target_dir):
-    """
-    自动嗅探工作目录下的 3 个核心表格：
-    1. 进度表/确认表 (progress_file)
-    2. 答卷明细表 (detail_file)
-    3. 项目人员列表 (user_file)
-    """
     all_files = glob.glob(os.path.join(target_dir, "*.xlsx")) + glob.glob(os.path.join(target_dir, "*.xls"))
     candidate_files = [
         f for f in all_files
@@ -210,6 +207,7 @@ def detect_source_files(target_dir):
         and not os.path.basename(f).startswith("调研案例电签表")
         and "对账" not in os.path.basename(f)
         and "筛选" not in os.path.basename(f)
+        and "备份" not in os.path.basename(f)
     ]
     
     progress_file = None
@@ -226,11 +224,11 @@ def detect_source_files(target_dir):
         elif ("答卷" in fn or "明细" in fn or "调研" in fn or re.search(r'\d+[\-_]\d+', fn)) and not detail_file:
             detail_file = f
 
-    # 第二级：若有未识别的文件，通过内部表头特征二次嗅探
+    # 第二级：内容特征二次嗅探
     unassigned = [f for f in candidate_files if f not in [progress_file, detail_file, user_file]]
     for f in unassigned:
         try:
-            df_head = pd.read_excel(f, nrows=3)
+            df_head = pd.read_excel(f, nrows=3, dtype=str)
             cols = [str(c) for c in df_head.columns]
             cols_text = "".join(cols)
             
@@ -248,7 +246,7 @@ def detect_source_files(target_dir):
 # ==================== 4. 核心处理引擎 ====================
 def process_survey_settlement(target_dir="."):
     print("=" * 70)
-    print("      🏥 调研案例电签表 - 一键智能结算核验引擎 (生产就绪版)")
+    print("      🏥 调研案例电签表 - 一键智能结算核验引擎 (高精度版)")
     print("=" * 70)
     print(f"📁 工作目录: {os.path.abspath(target_dir)}\n")
     
@@ -263,13 +261,12 @@ def process_survey_settlement(target_dir="."):
     if not detail_file or not user_file:
         raise ValueError("核心源文件缺失：必须至少包含【答卷明细表】与【项目人员表】！")
 
-    # 1. 读取表格
-    df_detail = pd.read_excel(detail_file)
-    df_user = pd.read_excel(user_file)
-    df_progress = pd.read_excel(progress_file) if progress_file else None
+    # 1. 强制以纯字符串读取所有表格，杜绝任何浮点截断与科学计数法篡改
+    df_detail = pd.read_excel(detail_file, dtype=str).fillna("")
+    df_user = pd.read_excel(user_file, dtype=str).fillna("")
+    df_progress = pd.read_excel(progress_file, dtype=str).fillna("") if progress_file else None
 
     # 2. 动态定位列名
-    # 明细表
     col_d_code = find_column_by_aliases(df_detail.columns, 'task_detail_code')
     col_d_name = find_column_by_aliases(df_detail.columns, 'doctor_name')
     col_d_idcard = find_column_by_aliases(df_detail.columns, 'id_card')
@@ -284,7 +281,6 @@ def process_survey_settlement(target_dir="."):
     col_d_status = find_column_by_aliases(df_detail.columns, 'audit_status')
     col_d_time = find_column_by_aliases(df_detail.columns, 'create_time')
 
-    # 用户表
     col_u_name = find_column_by_aliases(df_user.columns, 'doctor_name')
     col_u_idcard = find_column_by_aliases(df_user.columns, 'id_card')
     col_u_phone = find_column_by_aliases(df_user.columns, 'phone')
@@ -300,18 +296,17 @@ def process_survey_settlement(target_dir="."):
     col_u_id_front = find_column_by_aliases(df_user.columns, 'id_front_pic')
     col_u_id_back = find_column_by_aliases(df_user.columns, 'id_back_pic')
 
-    # 3. 确定结算白名单
+    # 3. 确定待结算白名单
     if df_progress is not None:
         col_p_code = find_column_by_aliases(df_progress.columns, 'task_detail_code')
         if not col_p_code:
             col_p_code = df_progress.columns[0]
-        valid_codes = set(df_progress[col_p_code].dropna().astype(str).str.strip())
+        valid_codes = set(df_progress[col_p_code].str.strip())
         print(f"📋 从【进度确认表】提取待结算有效编码: {len(valid_codes)} 条")
-        matched_details = df_detail[df_detail[col_d_code].astype(str).str.strip().isin(valid_codes)].copy()
+        matched_details = df_detail[df_detail[col_d_code].str.strip().isin(valid_codes)].copy()
     else:
-        # 回退自适应：取审核通过的记录
         if col_d_status:
-            matched_details = df_detail[df_detail[col_d_status].astype(str).str.strip() == '审核通过'].copy()
+            matched_details = df_detail[df_detail[col_d_status].str.strip() == '审核通过'].copy()
             print(f"📋 未提供进度表，自动筛选明细表中「{col_d_status} == 审核通过」的记录: {len(matched_details)} 条")
         else:
             matched_details = df_detail.copy()
@@ -333,7 +328,7 @@ def process_survey_settlement(target_dir="."):
         
         b_name = clean_str(u[col_u_bank]) if col_u_bank else ""
         br_name = clean_str(u[col_u_branch]) if col_u_branch else ""
-        full_bank = format_bank_and_branch(b_name, br_name)
+        full_bank = format_bank_and_branch(card, b_name, br_name)
         
         u_dict = {
             '姓名': name,
@@ -350,23 +345,32 @@ def process_survey_settlement(target_dir="."):
             '身份证头像面': clean_str(u[col_u_id_front]) if col_u_id_front else "",
             '身份证反面': clean_str(u[col_u_id_back]) if col_u_id_back else "",
         }
-        if cid: user_map_by_idcard[cid] = u_dict
-        if phone: user_map_by_phone[phone] = u_dict
-        if name: user_map_by_name[name] = u_dict
+        
+        def store_user_rec(store, key, item):
+            if not key: return
+            if key not in store:
+                store[key] = item
+            else:
+                # 优先保留有卡号和有开户行的记录
+                if item['银行卡号'] and not store[key]['银行卡号']:
+                    store[key] = item
 
-    # 5. 全局项目名称推断 (统计所有源表中出现频次最高的非空活动/任务名称)
+        store_user_rec(user_map_by_idcard, cid, u_dict)
+        store_user_rec(user_map_by_phone, phone, u_dict)
+        store_user_rec(user_map_by_name, name, u_dict)
+
+    # 5. 全局项目名称推断
     all_proj_candidates = []
     if col_d_proj and not matched_details.empty:
-        all_proj_candidates.extend([clean_str(x) for x in matched_details[col_d_proj].dropna() if clean_str(x)])
+        all_proj_candidates.extend([clean_str(x) for x in matched_details[col_d_proj] if clean_str(x)])
     if col_u_proj and not df_user.empty:
-        all_proj_candidates.extend([clean_str(x) for x in df_user[col_u_proj].dropna() if clean_str(x)])
+        all_proj_candidates.extend([clean_str(x) for x in df_user[col_u_proj] if clean_str(x)])
     
     top_global_proj = Counter(all_proj_candidates).most_common(1)[0][0] if all_proj_candidates else ""
     top_global_proj_clean = extract_clean_project_name(top_global_proj)
     print(f"🏷️ 智能真实识别本期核心项目名称: [{top_global_proj_clean}]")
 
-    # 6. 按医生聚合
-    # 优先以明文身份证号分组，次选手机号，再次以姓名
+    # 6. 按医生聚合 (优先身份证，次选手机号，再次姓名)
     group_col = col_d_idcard or col_d_phone or col_d_name
     grouped = matched_details.groupby(group_col, sort=False)
 
@@ -379,29 +383,27 @@ def process_survey_settlement(target_dir="."):
         d_cid = clean_str(grp[col_d_idcard].iloc[0]) if col_d_idcard else ""
         d_phone = clean_str(grp[col_d_phone].iloc[0]) if col_d_phone else ""
         
-        # 严格防脱敏泄漏：若明细表中有星号，尝试从用户表反查明文
         u_info = user_map_by_idcard.get(d_cid) or user_map_by_phone.get(d_phone) or user_map_by_name.get(d_name) or {}
         
         final_name = d_name or u_info.get('姓名', '')
         final_cid = d_cid if '*' not in d_cid else u_info.get('身份证', d_cid)
         final_phone = d_phone if '*' not in d_phone else u_info.get('手机号', d_phone)
         
-        # 金额累计 (1积分=1元)
+        # 积分/金额 (1积分=1元)
         if col_d_points:
-            amt = int(pd.to_numeric(grp[col_d_points], errors='coerce').fillna(0).sum())
+            amt = int(sum(float(x) for x in grp[col_d_points] if clean_str(x)))
         else:
             amt = len(grp) * 100
         total_amount += amt
         
-        # 医院/工作单位
+        # 医院
         hosp = clean_str(grp[col_d_hosp].iloc[0]) if col_d_hosp else ""
         if not hosp: hosp = u_info.get('工作单位', '')
         
-        # 职称
+        # 职称与科室
         title = clean_str(grp[col_d_title].iloc[0]) if col_d_title else ""
         if not title: title = u_info.get('医务职称', '')
         
-        # 科室
         dept = clean_str(grp[col_d_dept].iloc[0]) if col_d_dept else ""
         if not dept: dept = u_info.get('科室', '')
         
@@ -416,25 +418,21 @@ def process_survey_settlement(target_dir="."):
             prov = prov or inf_prov
             city = city or inf_city
             
-        # 银行卡与开户行
+        # 银行卡与开户行 (来自人员表真实抓取)
         bank_card = u_info.get('银行卡号', '')
         open_bank = u_info.get('开户行', '')
         
-        # 异常告警检查
         if not bank_card:
-            warnings.append(f"医生【{final_name}】(单位: {hosp}, 金额: ¥{amt}) 尚未绑定银行卡号！")
-        if not open_bank and bank_card:
-            warnings.append(f"医生【{final_name}】有卡号({bank_card})，但缺失开户行/支行信息！")
+            warnings.append(f"医生【{final_name}】(单位: {hosp}, 金额: ¥{amt}) 在项目人员表中未登记银行卡号！")
             
         # 提交日期
         c_time = None
-        if col_d_time and pd.notna(grp[col_d_time].iloc[0]):
+        if col_d_time and clean_str(grp[col_d_time].iloc[0]):
             try:
                 c_time = pd.to_datetime(grp[col_d_time].iloc[0])
             except Exception:
                 pass
                 
-        # 真实项目名称
         raw_doc_proj = clean_str(grp[col_d_proj].iloc[0]) if col_d_proj else ""
         doc_proj = extract_clean_project_name(raw_doc_proj) if raw_doc_proj else top_global_proj_clean
 
@@ -462,10 +460,10 @@ def process_survey_settlement(target_dir="."):
             '_语料条数': len(grp)
         })
 
-    # 按金额降序、姓名升序
+    # 按金额降序排列
     doctor_summary_list.sort(key=lambda x: (-x['金额*'], x['姓名*']))
     
-    # 7. 写入最终电签表 (严格标准 20 列)
+    # 7. 写入最终电签表
     FINAL_COLUMNS = [
         '姓名*', '开始年*', '开始月*', '开始日*', '项目名称*', '金额*', '姓名1*', '省份*', '市*',
         '身份证*', '手机号*', '开户行*', '银行卡号*', '工作单位*', '医务职称*', '科室*',
@@ -495,6 +493,7 @@ def process_survey_settlement(target_dir="."):
         for c_idx, col_name in enumerate(FINAL_COLUMNS, 1):
             val = doc.get(col_name, "")
             c = ws.cell(row=r_idx, column=c_idx)
+            c.font = data_font
             
             if col_name in ['身份证*', '手机号*', '银行卡号*']:
                 c.number_format = '@'
@@ -513,7 +512,6 @@ def process_survey_settlement(target_dir="."):
             else:
                 c.value = str(val) if val != "" else ""
                 c.alignment = Alignment(horizontal="left", vertical="center")
-            c.font = data_font
 
     # 自适应列宽
     for col in ws.columns:
@@ -558,20 +556,16 @@ def process_survey_settlement(target_dir="."):
         with open(warn_file, "w", encoding="utf-8") as wf:
             wf.write("\n".join(warnings))
         print(f"⚠️ 发现 {len(warnings)} 项待核查数据异常，已生成：【警告】待核查异常名单.txt")
-        for w in warnings:
-            print(f"   • {w}")
-    else:
-        print("✨ 数据完整性核验 100% 通过，无缺失卡号！")
 
-    # 10. 打印最终结算看板
+    # 10. 打印控制台核心业务报表
     print("\n" + "=" * 70)
-    print("📊 本期结算核心指标看板：")
+    print("                 📊 结算核对核心业务 KPI 报表")
+    print("=" * 70)
     print(f"   • 本期结算总人数 : {len(doctor_summary_list)} 位医生")
     print(f"   • 本期完成案例数 : {len(matched_details)} 份")
     print(f"   • 本期发放总金额 : ¥ {total_amount:,.2f} 元")
     print(f"   • 核心项目名称   : {top_global_proj_clean}")
     print("=" * 70 + "\n")
-    return True
 
 if __name__ == "__main__":
     work_dir = sys.argv[1] if len(sys.argv) > 1 else "."
