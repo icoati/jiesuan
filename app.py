@@ -1576,12 +1576,12 @@ elif current_module == MODULE_ZHENGHE:
             </div>
             <div>
                 <div class="ios-hero-title">{MODULE_ZHENGHE}</div>
-                <div class="ios-hero-subtitle">自适应任意行数、表头同义词智能定位、卡号防科学计数失真、双向勾稽门禁。</div>
+                <div class="ios-hero-subtitle">智能关联语料明文与用户明文，自动完成银行资质补全、税费核算与电签报销单生成。<br>支持「💼 正算扣税」、「⚡ 不计税」与「🔄 倒推算税」三模式，严格对齐 22 项标准电签规范。</div>
             </div>
         </div>
         <div class="ios-hero-pill">
             <span class="ios-hero-pill-dot"></span>
-            Python 审计内核
+            多表智能融合
         </div>
     </div>
     """)
@@ -1593,23 +1593,30 @@ elif current_module == MODULE_ZHENGHE:
     <div class="bento-req-container">
         <div class="bento-req-header">
             <div class="bento-req-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
                 <span>源文件规范与自动识别要求</span>
             </div>
-            <div class="bento-req-badge">多表智能嗅探 · 自动对齐</div>
+            <div class="bento-req-badge">多表特征自动嗅探匹配</div>
         </div>
         <div class="bento-req-grid">
             <div class="bento-card">
                 <div class="bento-card-num">01</div>
                 <div class="bento-card-content">
-                    <div class="bento-card-title">结算明细文件 <span class="req-tag-must">必须</span></div>
-                    <div class="bento-card-desc">包含医生姓名、单价、语料/任务编号等核心数据的明细表格</div>
+                    <div class="bento-card-title">语料列表 (明文) <span class="req-tag-must">必须</span></div>
+                    <div class="bento-card-desc">包含医生姓名、单价、题目内容、提交时间、审核状态与结算状态</div>
                 </div>
             </div>
             <div class="bento-card">
                 <div class="bento-card-num">02</div>
                 <div class="bento-card-content">
-                    <div class="bento-card-title">辅助任务明细 / 确认单 <span class="req-tag-opt">可选</span></div>
+                    <div class="bento-card-title">用户列表 (明文) <span class="req-tag-must">必须/推荐</span></div>
+                    <div class="bento-card-desc">包含医生银行卡号、开户行、支行、身份证号、手机号等金融资质</div>
+                </div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-card-num">03</div>
+                <div class="bento-card-content">
+                    <div class="bento-card-title">辅助任务确认单 / 支付清单 <span class="req-tag-opt">可选</span></div>
                     <div class="bento-card-desc">第三方系统导出的核验单据，提供时自动进行双向交叉勾稽核验</div>
                 </div>
             </div>
@@ -1618,7 +1625,7 @@ elif current_module == MODULE_ZHENGHE:
     """)
 
     uploaded_zhenghe_files = st.file_uploader(
-        "拖拽或批量选择上传源表格 (.xlsx / .xls，支持同时上传结算明细与辅助确认单)",
+        "拖拽或批量选择上传源表格 (.xlsx / .xls，支持同时上传语料列表、用户列表与辅助确认单)",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
         key="upload_zhenghe"
@@ -1626,177 +1633,242 @@ elif current_module == MODULE_ZHENGHE:
 
     # 智能实时预识别嗅探
     file_yl_obj = None
+    file_u_obj = None
     file_task_obj = None
 
     if uploaded_zhenghe_files:
         # 第一轮：按文件名强特征优先匹配
         for uf in uploaded_zhenghe_files:
             fname = uf.name.lower()
-            if any(k in fname for k in ["任务明细", "确认单", "js-", "核验", "对账"]):
+            if any(k in fname for k in ["用户列表", "用户明文", "医生列表", "用户"]):
+                if not file_u_obj:
+                    file_u_obj = uf
+            elif any(k in fname for k in ["确认单", "支付清单", "支付", "js-", "核验", "对账"]):
                 if not file_task_obj:
                     file_task_obj = uf
-            elif any(k in fname for k in ["语料", "结算明细", "明细", "结算", "上药", "雷允上"]):
+            elif any(k in fname for k in ["语料列表", "语料明文", "语料", "结算明细", "明细", "结算"]):
                 if not file_yl_obj:
                     file_yl_obj = uf
 
-        # 第二轮：表头探测
+        # 第二轮：表头特征深度探测
         for uf in uploaded_zhenghe_files:
-            if uf in [file_yl_obj, file_task_obj]:
+            if uf in [file_yl_obj, file_u_obj, file_task_obj]:
                 continue
             try:
                 df_head = pd.read_excel(io.BytesIO(uf.getvalue()), nrows=2)
                 h_str = "".join([str(c) for c in df_head.columns])
-                if not file_task_obj and ("任务名称" in h_str or "课程名称" in h_str or "确认单" in h_str):
-                    file_task_obj = uf
-                elif not file_yl_obj and ("医生" in h_str or "姓名" in h_str or "单价" in h_str or "卡号" in h_str or "银行" in h_str):
+                if not file_u_obj and ("银行卡" in h_str or "开户行" in h_str or "支行" in h_str) and ("题目" not in h_str and "回答" not in h_str):
+                    file_u_obj = uf
+                elif not file_yl_obj and ("题目" in h_str or "回答" in h_str or "语料" in h_str or "单价" in h_str):
                     file_yl_obj = uf
+                elif not file_task_obj and ("确认单" in h_str or "课程名称" in h_str or "任务明细" in h_str):
+                    file_task_obj = uf
             except Exception:
                 pass
 
-        # 兜底匹配：若只上传了 1 个文件且未识别，默认为结算主明细
+        # 兜底匹配：若未分配且只有1个文件，默认为语料明细
         if not file_yl_obj and len(uploaded_zhenghe_files) == 1:
             file_yl_obj = uploaded_zhenghe_files[0]
-        elif not file_yl_obj and uploaded_zhenghe_files:
-            for uf in uploaded_zhenghe_files:
-                if uf != file_task_obj:
-                    file_yl_obj = uf
-                    break
 
         st.markdown("##### 实时文件嗅探匹配结果")
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
             if file_yl_obj:
-                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">01 结算明细文件 (*必选)</div><div class="ios-status-card-val">{file_yl_obj.name}</div></div>')
+                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">01 语料明细 (*必选)</div><div class="ios-status-card-val">{file_yl_obj.name}</div></div>')
             else:
-                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">01 结算明细文件 (*必选)</div><div class="ios-status-card-val">未识别 (需包含“明细/语料/结算”)</div></div>')
+                render_html('<div class="ios-status-card warning"><div class="ios-status-card-title">01 语料明细 (*必选)</div><div class="ios-status-card-val">未识别 (需包含“语料/明细”)</div></div>')
         with c2:
-            if file_task_obj:
-                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">02 辅助任务明细/确认单 (可选)</div><div class="ios-status-card-val">{file_task_obj.name}</div></div>')
+            if file_u_obj:
+                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">02 用户列表 (金融资质)</div><div class="ios-status-card-val">{file_u_obj.name}</div></div>')
             else:
-                render_html('<div class="ios-status-card neutral"><div class="ios-status-card-title">02 辅助任务明细/确认单 (可选)</div><div class="ios-status-card-val">未提供 (将直接根据主明细加总)</div></div>')
+                render_html('<div class="ios-status-card neutral"><div class="ios-status-card-title">02 用户列表 (金融资质)</div><div class="ios-status-card-val">未提供 (将从明细提取)</div></div>')
+        with c3:
+            if file_task_obj:
+                render_html(f'<div class="ios-status-card success"><div class="ios-status-card-title">03 辅助确认单 (可选)</div><div class="ios-status-card-val">{file_task_obj.name}</div></div>')
+            else:
+                render_html('<div class="ios-status-card neutral"><div class="ios-status-card-title">03 辅助确认单 (可选)</div><div class="ios-status-card-val">未提供 (自动按已加入结算单汇总)</div></div>')
 
-    _, col_btn, _ = st.columns([1, 1.8, 1])
-    with col_btn:
-        run_btn = st.button(f"开始生成：{MODULE_ZHENGHE}", type="primary", use_container_width=True)
+    # ================= 专属高颜值：按照统一风格采用 st.tabs 呈现核算模式 =================
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    tab_zh_fwd, tab_zh_notax, tab_zh_rev = st.tabs([
+        "💼 正算扣税 (HCP自行承担税费)",
+        "⚡ 不计税",
+        "🔄 倒推算税 (企业承担税费)"
+    ])
 
-    if run_btn:
+    def run_zhenghe_pipeline(zh_mode: str):
         if not file_yl_obj:
-            st.error("请先上传【01. 结算明细文件】（必选）后再点击开始生成。")
-        else:
-            with st.status("正在沙盒中执行北京整合-上药雷允上结算逻辑...", expanded=True) as status:
-                st.write("1. 正在初始化沙盒...")
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    yl_path = os.path.join(temp_dir, file_yl_obj.name)
-                    with open(yl_path, "wb") as f:
-                        f.write(file_yl_obj.getvalue())
+            st.error("请先上传【01. 语料明细文件】（必选）后再点击开始生成。")
+            return
 
-                    task_path = None
-                    if file_task_obj:
-                        task_path = os.path.join(temp_dir, file_task_obj.name)
-                        with open(task_path, "wb") as f:
-                            f.write(file_task_obj.getvalue())
+        with st.status(f"正在沙盒环境中执行【{MODULE_ZHENGHE}】核心结算逻辑（模式：{zh_mode}）...", expanded=True) as status:
+            st.write("1. 正在初始化沙盒环境与缓存文件...")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                yl_path = os.path.join(temp_dir, file_yl_obj.name)
+                with open(yl_path, "wb") as f:
+                    f.write(file_yl_obj.getvalue())
 
-                    st.write("2. 调度原版结算审计引擎...")
-                    script_dir = os.path.join(ROOT_DIR, "整合学会统计")
-                    
-                    env = os.environ.copy()
-                    env["PYTHONIOENCODING"] = "utf-8"
-                    env["PYTHONUTF8"] = "1"
+                u_path = None
+                if file_u_obj:
+                    u_path = os.path.join(temp_dir, file_u_obj.name)
+                    with open(u_path, "wb") as f:
+                        f.write(file_u_obj.getvalue())
 
-                    runner_script = """
-import sys
-from pathlib import Path
-script_dir = sys.argv[1]
-yl = sys.argv[2]
-task = sys.argv[3] if sys.argv[3] != "NONE" else None
-out_dir = sys.argv[4]
+                task_path = None
+                if file_task_obj:
+                    task_path = os.path.join(temp_dir, file_task_obj.name)
+                    with open(task_path, "wb") as f:
+                        f.write(file_task_obj.getvalue())
 
-sys.path.insert(0, script_dir)
-from settlement_mac import process_settlement
+                st.write(f"2. 调度结算审计引擎（模式：{zh_mode}）...")
+                script_path = os.path.join(ROOT_DIR, "整合学会统计", "settlement_mac.py")
 
-out1, out2 = process_settlement(yl, task, out_dir, log_func=print)
-print("SUCCESS_OUT1:" + str(out1))
-print("SUCCESS_OUT2:" + str(out2))
-"""
-                    proc = subprocess.run(
-                        [
-                            sys.executable,
-                            "-c",
-                            runner_script,
-                            script_dir,
-                            yl_path,
-                            task_path if task_path else "NONE",
-                            temp_dir
-                        ],
-                        cwd=temp_dir,
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8"
-                    )
+                env = os.environ.copy()
+                env["PYTHONIOENCODING"] = "utf-8"
+                env["PYTHONUTF8"] = "1"
 
-                    gen_files = {}
-                    ignore_names = [file_yl_obj.name]
-                    if file_task_obj:
-                        ignore_names.append(file_task_obj.name)
-                    for p in Path(temp_dir).glob("*.xlsx"):
-                        if p.name not in ignore_names:
-                            with open(p, "rb") as f:
-                                gen_files[p.name] = f.read()
+                cmd = [
+                    sys.executable,
+                    script_path,
+                    yl_path,
+                    u_path if u_path else "NONE",
+                    task_path if task_path else "NONE",
+                    temp_dir,
+                    f"--mode={zh_mode}"
+                ]
 
-                    if proc.returncode == 0 and gen_files:
-                        status.update(label="结算表格生成完毕", state="complete")
-                        st.success(f"成功完成对账结算，共生成 {len(gen_files)} 个结算报表")
+                proc = subprocess.run(
+                    cmd,
+                    cwd=temp_dir,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8"
+                )
 
-                        doc_count_match = re.search(r'汇总完成[^\d]*(\d+)[^\d]*位医生', proc.stdout)
-                        amount_match = re.search(r'劳务实发总额[^\d]*([0-9\.,]+)', proc.stdout)
+                gen_files = {}
+                ignore_names = [file_yl_obj.name]
+                if file_u_obj:
+                    ignore_names.append(file_u_obj.name)
+                if file_task_obj:
+                    ignore_names.append(file_task_obj.name)
 
-                        # 自动归档至历史记录
-                        doc_cnt = doc_count_match.group(1) if doc_count_match else f"{len(gen_files)}"
-                        amt_str = amount_match.group(1) if amount_match else "已核算平账"
-                        kpi_summary = f"本次结算专家数 {doc_cnt} 人 · 实发劳务总金额 ¥ {amt_str}"
-                        history_manager.save_run(MODULE_ZHENGHE, gen_files, summary=kpi_summary)
+                for p in Path(temp_dir).iterdir():
+                    if p.name not in ignore_names and not p.name.startswith("~$") and (p.suffix in [".xlsx", ".xls"]):
+                        with open(p, "rb") as f:
+                            gen_files[p.name] = f.read()
 
-                        st.markdown("##### 结算对账 KPI 看板")
-                        k1, k2 = st.columns(2)
-                        with k1:
-                            st.metric("本次结算专家数", f"{doc_count_match.group(1)} 人" if doc_count_match else f"{len(gen_files)} 份表单")
-                        with k2:
-                            st.metric("实发劳务总金额", f"¥ {amount_match.group(1)}" if amount_match else "已核算平账")
+                if proc.returncode == 0 and gen_files:
+                    today_dash = get_beijing_now().strftime("%Y-%m-%d")
+                    main_xlsx_name = f"整合-{today_dash}.xlsx"
 
-                        st.markdown("##### 生成表格数据概览与下载")
-                        tabs = st.tabs([f"{k} ({format_size(len(v))})" for k, v in gen_files.items()])
-                        for idx, (fname, fbytes) in enumerate(gen_files.items()):
-                            with tabs[idx]:
-                                try:
-                                    df_prev = pd.read_excel(io.BytesIO(fbytes))
-                                    st.dataframe(df_prev.head(100), use_container_width=True)
-                                except Exception:
-                                    pass
-                                st.download_button(
-                                    label=f"单独下载【{fname}】 ({format_size(len(fbytes))})",
-                                    data=fbytes,
-                                    file_name=fname,
-                                    key=f"dl_{fname}"
-                                )
+                    status.update(label=f"【{MODULE_ZHENGHE}】({zh_mode}) 处理完成！", state="complete")
+                    st.success(f"对账与结算明细表单生成完毕！主报销单已生成：【{main_xlsx_name}】(22列标准电签规范)")
 
-                        with st.expander("查看审计核验完整日志", expanded=False):
-                            st.code(proc.stdout)
+                    doc_count_match = re.search(r'结算医生总人数\s*:\s*(\d+)', proc.stdout)
+                    task_count_match = re.search(r'任务明细总笔数\s*:\s*(\d+)', proc.stdout)
+                    gross_match = re.search(r'本次应发含税总额\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
+                    tax_match = re.search(r'本次代扣个税总额\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
+                    net_match = re.search(r'本次实发到手总额\s*:\s*¥\s*([0-9\.,]+)', proc.stdout)
 
-                        if len(gen_files) > 1:
-                            st.markdown("---")
-                            zip_bytes = create_zip_archive(gen_files)
+                    doc_cnt = doc_count_match.group(1) if doc_count_match else f"{len(gen_files)}"
+                    task_cnt = task_count_match.group(1) if task_count_match else "已核验"
+                    gross_str = gross_match.group(1) if gross_match else "-"
+                    tax_str = tax_match.group(1) if tax_match else "0.00"
+                    net_str = net_match.group(1) if net_match else "已核算平账"
+
+                    # 自动归档至历史记录
+                    kpi_summary = f"[{zh_mode}] 结算专家 {doc_cnt} 人 · 任务 {task_cnt} 笔 · 实发总额 ¥ {net_str} · 应发 ¥ {gross_str} · 税金 ¥ {tax_str}"
+                    history_manager.save_run(MODULE_ZHENGHE, gen_files, summary=kpi_summary)
+
+                    # KPI 看板展示
+                    st.markdown("##### 结算对账核心指标看板")
+                    k1, k2, k3, k4 = st.columns(4)
+                    with k1:
+                        st.metric("本次结算专家数", f"{doc_cnt} 位")
+                    with k2:
+                        st.metric("任务明细总笔数", f"{task_cnt} 笔")
+                    with k3:
+                        st.metric("劳务实发总金额", f"¥ {net_str}")
+                    with k4:
+                        if zh_mode == "不计税":
+                            st.metric("应发含税总额", f"¥ {gross_str}", delta="¥ 0.00 免扣税金")
+                        elif zh_mode == "正算扣税":
+                            st.metric("应发税前总额", f"¥ {gross_str}", delta=f"-¥ {tax_str} 代扣个税", delta_color="inverse")
+                        else:
+                            st.metric("应发含税总额", f"¥ {gross_str}", delta=f"+¥ {tax_str} 倒推税金", delta_color="normal")
+
+                    # 表格概览与下载
+                    st.markdown("##### 生成表格数据概览与下载")
+                    tabs = st.tabs([f"{k} ({format_size(len(v))})" for k, v in gen_files.items()])
+                    for idx, (fname, fbytes) in enumerate(gen_files.items()):
+                        with tabs[idx]:
+                            try:
+                                df_prev = pd.read_excel(io.BytesIO(fbytes))
+                                st.dataframe(df_prev.head(100), use_container_width=True)
+                            except Exception:
+                                pass
                             st.download_button(
-                                label=f"打包下载全部结算表格 (ZIP) ({format_size(len(zip_bytes))})",
-                                data=zip_bytes,
-                                file_name="医生劳务结算完整包.zip",
-                                mime="application/zip",
-                                use_container_width=True
+                                label=f"单独下载【{fname}】 ({format_size(len(fbytes))})",
+                                data=fbytes,
+                                file_name=fname,
+                                key=f"dl_{zh_mode}_{fname}"
                             )
-                    else:
-                        status.update(label="结算生成失败", state="error")
-                        st.error("执行过程出现错误：")
-                        st.code(proc.stderr or proc.stdout)
+
+                    with st.expander("查看审计核验完整日志", expanded=False):
+                        st.code(proc.stdout)
+
+                    if len(gen_files) > 1:
+                        st.markdown("---")
+                        zip_bytes = create_zip_archive(gen_files)
+                        zip_name = f"北京整合-上药雷允上结算包-{today_dash}.zip"
+                        st.download_button(
+                            label=f"📦 一键打包下载全部结算表格 (ZIP) ({format_size(len(zip_bytes))})",
+                            data=zip_bytes,
+                            file_name=zip_name,
+                            mime="application/zip",
+                            use_container_width=True,
+                            type="primary",
+                            key=f"dl_zip_{zh_mode}"
+                        )
+                else:
+                    status.update(label="结算生成失败", state="error")
+                    st.error("执行过程出现错误：")
+                    st.code(proc.stderr or proc.stdout)
+
+    with tab_zh_fwd:
+        render_html("""
+        <div class="ios-notice-box">
+            <b>💼 正算扣税 (HCP自行承担税费) 模式说明：</b><br>
+            • <b>核算逻辑</b>：语料任务金额作为<b>税前应发金额</b>（含个税金额*），系统按国家法定劳务报酬所得预扣预缴税率扣缴个税后，计算出医生<b>税后实发到手金额</b>（税后金额*）。<br>
+            • <b>举例说明</b>：医生本期劳务费为 1,000 元，应发 1,000 元，按速算扣除个税 40 元，实发到手 960 元。<br>
+            • <b>产出表格</b>：严格对齐《整合.xlsx》22 列标准模板，生成 <code>整合-YYYY-MM-DD.xlsx</code> 与 <code>.xls</code>，并同步输出完整带公式《劳务明细总表》与《任务明细表》。
+        </div>
+        """)
+        st.button(f"🚀 开始生成：{MODULE_ZHENGHE} (正算扣税)", type="primary", use_container_width=True, key="btn_run_zh_fwd", on_click=lambda: run_zhenghe_pipeline("正算扣税"))
+
+    with tab_zh_notax:
+        render_html("""
+        <div class="ios-notice-box">
+            <b>⚡ 不计税 模式说明：</b><br>
+            • <b>核算逻辑</b>：全额发放任务金额，<b>免扣个税</b>。税后金额* 与 含个税金额* 均等于任务应发总金额（个税税金标 0.00 元）。<br>
+            • <b>举例说明</b>：医生本期劳务费为 1,000 元，实际到手即为 1,000 元，不扣税金。<br>
+            • <b>产出表格</b>：严格对齐《整合.xlsx》22 列标准模板，生成 <code>整合-YYYY-MM-DD.xlsx</code> 与 <code>.xls</code>，并同步输出《劳务明细总表》与《任务明细表》。
+        </div>
+        """)
+        st.button(f"🚀 开始生成：{MODULE_ZHENGHE} (不计税)", type="primary", use_container_width=True, key="btn_run_zh_notax", on_click=lambda: run_zhenghe_pipeline("不计税"))
+
+    with tab_zh_rev:
+        render_html("""
+        <div class="ios-notice-box">
+            <b>🔄 倒推算税 (企业承担税费) 模式说明：</b><br>
+            • <b>核算逻辑</b>：语料任务金额直接作为医生的<b>税后实发到手金额</b>（税后金额*），系统反向倒推计算应发税前总额（含个税金额*）及企业应承担税费。<br>
+            • <b>举例说明</b>：医生实发到手 1,000 元，反推应发 1,050 元，企业承担税费 50 元。<br>
+            • <b>产出表格</b>：严格对齐《整合.xlsx》22 列标准模板，生成 <code>整合-YYYY-MM-DD.xlsx</code> 与 <code>.xls</code>，并同步输出带反算公式的《劳务明细总表》与《任务明细表》。
+        </div>
+        """)
+        st.button(f"🚀 开始生成：{MODULE_ZHENGHE} (倒推算税)", type="primary", use_container_width=True, key="btn_run_zh_rev", on_click=lambda: run_zhenghe_pipeline("倒推算税"))
+
 
 
 # =============================================================
