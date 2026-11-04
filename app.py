@@ -1811,7 +1811,7 @@ elif current_module == MODULE_CORPUS:
             </div>
             <div>
                 <div class="ios-hero-title">{MODULE_CORPUS}</div>
-                <div class="ios-hero-subtitle">智能嗅探 3 张关键表格，自动完成实发清单、银行发放表与对账明细的端到端核验。<br>支持「💼 正算扣税」与「⚡ 不计税」双模式切换，项目名称智能提取双引号核心内容。</div>
+                <div class="ios-hero-subtitle">智能嗅探 3 张关键表格，自动完成实发清单、银行发放表与对账明细的端到端核验。<br>支持「💼 正算扣税」与「⚡ 不计税」双模式切换，严格对齐 22 项标准电签字段规范。</div>
             </div>
         </div>
         <div class="ios-hero-pill">
@@ -2090,7 +2090,7 @@ elif current_module == MODULE_CORPUS:
         <div style="background: rgba(2, 132, 199, 0.05); border: 1px solid rgba(2, 132, 199, 0.2); border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; color: #0369a1; font-size: 0.88rem; line-height: 1.55;">
             <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 4px;">💼 正算扣税模式说明：</div>
             • <b>核算规则</b>：任务金额直接作为<b>税前应发金额</b>，专家依国家劳务报酬标准扣除个税后实发（应发≤800免税；800~4000扣除800按20%预扣；>4000扣除20%费用按超额累进预扣；例如应发 1000 元，扣税 40 元，实发 960 元）。<br>
-            • <b>交付表单</b>：主报销单命名为 <code>康恩贝语料库电签表-YYYY-MM-DD.xlsx</code>，生成的【金额*】列为税后实发金额；打包为 <code>康恩贝语料库电签表-YYYY-MM-DD.zip</code>。
+            • <b>交付表单</b>：主报销单命名为 <code>康恩贝语料库电签表-YYYY-MM-DD.xlsx</code>，严格生成标准 22 项电签表头；其中【税后金额*】为实发到手金额（如 960 元），【含个税金额*】为税前应发总额（如 1000 元）；打包为 <code>康恩贝语料库电签表-YYYY-MM-DD.zip</code>。
         </div>
         """, unsafe_allow_html=True)
         _, col_btn_tax, _ = st.columns([1, 1.8, 1])
@@ -2104,7 +2104,7 @@ elif current_module == MODULE_CORPUS:
         <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; color: #047857; font-size: 0.88rem; line-height: 1.55;">
             <div style="font-weight: 700; font-size: 0.94rem; margin-bottom: 4px;">⚡ 不计税模式说明：</div>
             • <b>核算规则</b>：任务金额直接作为全额实发金额，<b>不扣税金，税金恒为 ¥ 0.00 元</b>（实发金额 = 任务应发总额；例如任务金额 1000 元，实发金额为 1000 元）。<br>
-            • <b>交付表单</b>：主报销单命名为 <code>语料库电签表-YYYY-MM-DD.xlsx</code>，生成的【金额*】列为全额任务金额；打包为 <code>语料库电签表-YYYY-MM-DD.zip</code>。
+            • <b>交付表单</b>：主报销单命名为 <code>语料库电签表-YYYY-MM-DD.xlsx</code>，严格生成标准 22 项电签表头；不扣个税，【税后金额*】与【含个税金额*】均等于任务应发总额（如 1000 元）；打包为 <code>语料库电签表-YYYY-MM-DD.zip</code>。
         </div>
         """, unsafe_allow_html=True)
         _, col_btn_notax, _ = st.columns([1, 1.8, 1])

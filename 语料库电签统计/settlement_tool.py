@@ -50,7 +50,12 @@ COLUMN_ALIASES = {
     'question': ['题目内容', '题目', '问答题目', '问题', '题干'],
     'answer': ['回答记录', '回答', '医生回答', '答案', '回答内容'],
     'project_name': ['参与项目', '项目名称', '参与活动', '活动名称', '所属项目', '所属项目名称', '项目', '活动', '参与活动规则', '项目名', '活动名', '业务项目'],
-    'domain': ['疾病领域', '领域', '病种']
+    'domain': ['疾病领域', '领域', '病种'],
+    'province': ['所属省', '省份', '省', '开户行省份', '医生省份'],
+    'city': ['所属市', '城市', '市', '开户行城市', '医生城市'],
+    'location': ['项目地点', '地点', '执行地点', '活动地点', '项目城市'],
+    'id_card_front': ['身份证头像面', '身份证正面', '身份证人像面', '头像面'],
+    'id_card_back': ['身份证反面', '身份证国徽面', '国徽面', '反面']
 }
 
 # 城市智能识别规则
@@ -458,6 +463,9 @@ def process_settlement(target_dir=".", no_tax=False):
     c_dept_col = find_col_name(df_corpus.columns, 'department')
     c_title_col = find_col_name(df_corpus.columns, 'title')
     c_time_col = find_col_name(df_corpus.columns, 'submit_time')
+    c_prov_col = find_col_name(df_corpus.columns, 'province')
+    c_city_col = find_col_name(df_corpus.columns, 'city')
+    c_loc_col = find_col_name(df_corpus.columns, 'location')
 
     if not c_id_col:
         print(f"❌ 语料列表中未能识别到【语料词条编号】列！可用列: {list(df_corpus.columns)}")
@@ -512,6 +520,11 @@ def process_settlement(target_dir=".", no_tax=False):
     u_bank_col = find_col_name(u_header, 'bank_name')
     u_card_col = find_col_name(u_header, 'bank_card')
     u_branch_col = find_col_name(u_header, 'branch_name')
+    u_prov_col = find_col_name(u_header, 'province')
+    u_city_col = find_col_name(u_header, 'city')
+    u_loc_col = find_col_name(u_header, 'location')
+    u_idcard_front_col = find_col_name(u_header, 'id_card_front')
+    u_idcard_back_col = find_col_name(u_header, 'id_card_back')
     
     user_map_by_id = {}
     user_map_by_phone = {}
@@ -652,7 +665,40 @@ def process_settlement(target_dir=".", no_tax=False):
         if not bank_card:
             warnings.append(f"医生【{name}】(手机: {phone}, 身份证: {cid}) 未在用户列表中找到银行卡号！")
             
-        prov, city = parse_hospital_location(hosp)
+        # 省市确定：优先取语料列表/用户列表明细，无则从医院名称正则解析
+        prov_val = ""
+        city_val = ""
+        if c_prov_col and str(grp[c_prov_col].iloc[0]).strip() and str(grp[c_prov_col].iloc[0]).strip().lower() not in ['nan', 'none', 'null', '']:
+            prov_val = str(grp[c_prov_col].iloc[0]).strip()
+        elif u_prov_col and str(u_info.get(u_prov_col, "")).strip() and str(u_info.get(u_prov_col, "")).strip().lower() not in ['nan', 'none', 'null', '']:
+            prov_val = str(u_info.get(u_prov_col, "")).strip()
+            
+        if c_city_col and str(grp[c_city_col].iloc[0]).strip() and str(grp[c_city_col].iloc[0]).strip().lower() not in ['nan', 'none', 'null', '']:
+            city_val = str(grp[c_city_col].iloc[0]).strip()
+        elif u_city_col and str(u_info.get(u_city_col, "")).strip() and str(u_info.get(u_city_col, "")).strip().lower() not in ['nan', 'none', 'null', '']:
+            city_val = str(u_info.get(u_city_col, "")).strip()
+
+        if not prov_val or not city_val:
+            parsed_prov, parsed_city = parse_hospital_location(hosp)
+            prov_val = prov_val or parsed_prov
+            city_val = city_val or parsed_city
+
+        # 项目地点：优先明确地点字段，其次医生所在城市，再次省份，最后兜底线上
+        doc_loc = ""
+        if c_loc_col and str(grp[c_loc_col].iloc[0]).strip() and str(grp[c_loc_col].iloc[0]).strip().lower() not in ['nan', 'none', 'null', '']:
+            doc_loc = str(grp[c_loc_col].iloc[0]).strip()
+        elif u_loc_col and str(u_info.get(u_loc_col, "")).strip() and str(u_info.get(u_loc_col, "")).strip().lower() not in ['nan', 'none', 'null', '']:
+            doc_loc = str(u_info.get(u_loc_col, "")).strip()
+        if not doc_loc:
+            doc_loc = city_val or prov_val or "线上"
+
+        # 身份证头像面与反面
+        id_front = ""
+        id_back = ""
+        if u_idcard_front_col and str(u_info.get(u_idcard_front_col, "")).strip() and str(u_info.get(u_idcard_front_col, "")).strip().lower() not in ['nan', 'none', 'null', '']:
+            id_front = str(u_info.get(u_idcard_front_col, "")).strip()
+        if u_idcard_back_col and str(u_info.get(u_idcard_back_col, "")).strip() and str(u_info.get(u_idcard_back_col, "")).strip().lower() not in ['nan', 'none', 'null', '']:
+            id_back = str(u_info.get(u_idcard_back_col, "")).strip()
 
         # 医生所属项目名称判定：
         # 1. 优先取该医生在用户列表中的个人参与项目/活动（只取“”内的内容）
@@ -673,48 +719,62 @@ def process_settlement(target_dir=".", no_tax=False):
             doc_proj = top_proj_name
 
         doc_proj = extract_quoted_text(doc_proj)
+
+        # 金额计算：
+        # 正算扣税：税后金额* 为实发 net_amt，含个税金额* 为应发 gross_amt
+        # 不计税：税后金额* 与 含个税金额* 均等于任务应发总额 gross_amt
+        if no_tax:
+            after_tax_amt = gross_amt
+            tax_inclusive_amt = gross_amt
+        else:
+            after_tax_amt = net_amt
+            tax_inclusive_amt = gross_amt
         
         doctor_summary_list.append({
             '姓名*': name,
             '开始年*': s_year,
             '开始月*': s_month,
             '开始日*': s_day,
-            '项目名称': doc_proj,
-            '金额*': net_amt,          # 实发金额（银行实际代发标准金额）
+            '项目地点*': doc_loc,
+            '项目名称*': doc_proj,
+            '税后金额*': after_tax_amt,
+            '含个税金额*': tax_inclusive_amt,
             '应发金额': gross_amt,       # 任务应发总金额
             '代扣个税': tax_amt,         # 代扣劳务报酬个税
             '实发金额': net_amt,         # 税后实发金额
             '姓名1*': name,
-            '省份*': prov,
-            '市*': city,
+            '省份*': prov_val,
+            '市*': city_val,
             '身份证*': cid,
             '手机号*': phone,
             '开户行*': full_bank,
             '银行卡号*': bank_card,
             '工作单位*': hosp,
-            '医务职称*': title,
             '科室*': dept,
+            '医务职称*': title,
             '签署日期': '',
             '签署日期1': '',
+            '身份证头像面': id_front,
+            '身份证反面': id_back,
             '语料条数': count,
             '开户银行': bank_name,
             '支行名称': branch_name
         })
         
-    doctor_summary_list.sort(key=lambda x: (-x['金额*'], x['姓名*']))
+    doctor_summary_list.sort(key=lambda x: (-x['税后金额*'], -x['含个税金额*'], x['姓名*']))
     
     total_docs = len(doctor_summary_list)
     total_corpus_count = sum(d['语料条数'] for d in doctor_summary_list)
-    total_gross_amount = sum(d['应发金额'] for d in doctor_summary_list)
+    total_gross_amount = sum(d['含个税金额*'] for d in doctor_summary_list)
     total_tax_amount = sum(d['代扣个税'] for d in doctor_summary_list)
-    total_net_amount = sum(d['金额*'] for d in doctor_summary_list)
+    total_net_amount = sum(d['税后金额*'] for d in doctor_summary_list)
     total_settle_amount = total_net_amount
 
-    # 导出文件
+    # 导出文件（严格与生成内容.xlsx模板 22 列完全一致）
     final_columns = [
-        '姓名*', '开始年*', '开始月*', '开始日*', '项目名称', '金额*', '姓名1*', '省份*', '市*',
-        '身份证*', '手机号*', '开户行*', '银行卡号*', '工作单位*', '医务职称*', '科室*',
-        '签署日期', '签署日期1'
+        '姓名*', '开始年*', '开始月*', '开始日*', '项目地点*', '项目名称*', '税后金额*', '含个税金额*',
+        '姓名1*', '省份*', '市*', '身份证*', '手机号*', '开户行*', '银行卡号*', '工作单位*',
+        '科室*', '医务职称*', '签署日期', '签署日期1', '身份证头像面', '身份证反面'
     ]
     
     # 1. 最终.xlsx
@@ -748,11 +808,11 @@ def process_settlement(target_dir=".", no_tax=False):
             elif col_name in ['开始年*', '开始月*', '开始日*']:
                 c.value = int(val) if val != "" else ""
                 c.alignment = Alignment(horizontal="center", vertical="center")
-            elif col_name == '金额*':
+            elif col_name in ['税后金额*', '含个税金额*']:
                 c.value = float(val) if val != "" else 0.0
                 c.number_format = '#,##0.00'
                 c.alignment = Alignment(horizontal="right", vertical="center")
-            elif col_name in ['姓名*', '姓名1*', '省份*', '市*', '医务职称*', '科室*']:
+            elif col_name in ['姓名*', '姓名1*', '省份*', '市*', '项目地点*', '医务职称*', '科室*']:
                 c.value = str(val)
                 c.alignment = Alignment(horizontal="center", vertical="center")
             else:
@@ -792,9 +852,9 @@ def process_settlement(target_dir=".", no_tax=False):
                     ws_xls.write(r_idx, c_idx, str(val), st_txt)
                 elif col_name in ['开始年*', '开始月*', '开始日*']:
                     ws_xls.write(r_idx, c_idx, int(val) if val != "" else "", st_int)
-                elif col_name == '金额*':
+                elif col_name in ['税后金额*', '含个税金额*']:
                     ws_xls.write(r_idx, c_idx, float(val) if val != "" else 0.0, st_amt)
-                elif col_name in ['姓名*', '姓名1*', '省份*', '市*', '医务职称*', '科室*']:
+                elif col_name in ['姓名*', '姓名1*', '省份*', '市*', '项目地点*', '医务职称*', '科室*']:
                     ws_xls.write(r_idx, c_idx, str(val), st_txt)
                 else:
                     ws_xls.write(r_idx, c_idx, str(val) if val != "" else "", st_left)
